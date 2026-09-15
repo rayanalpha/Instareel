@@ -1,0 +1,32 @@
+"""Celery app + beat schedule (all periodic tasks defined here)."""
+import os
+
+from celery import Celery
+from celery.schedules import crontab
+
+from app.config import settings
+
+celery = Celery("igfunnel", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="UTC",
+    enable_utc=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    task_routes={
+        "tasks.video_tasks.*": {"queue": "video"},
+        "tasks.post_tasks.*": {"queue": "posts"},
+    },
+)
+celery.autodiscover_tasks(["app.tasks"])
+
+celery.conf.beat_schedule = {
+    "check-scheduled-posts": {"task": "tasks.post_tasks.check_and_post", "schedule": crontab(minute="*")},
+    "fetch-analytics": {"task": "tasks.analytics_tasks.fetch_all_analytics", "schedule": crontab(hour="*/4")},
+    "check-bio-rotation": {"task": "tasks.bio_tasks.check_bio_rotation", "schedule": crontab(hour=6, minute=0)},
+    "proxy-health-check": {"task": "tasks.proxy_tasks.check_all_proxies", "schedule": crontab(minute="*/30")},
+    "media-cleanup": {"task": "tasks.cleanup_tasks.clean_old_media", "schedule": crontab(hour=4, minute=0)},
+    "reset-daily-counts": {"task": "tasks.account_tasks.reset_daily_counts", "schedule": crontab(hour=0, minute=0)},
+}

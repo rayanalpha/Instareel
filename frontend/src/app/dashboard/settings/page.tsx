@@ -1,0 +1,49 @@
+"use client";
+import { Card, CardTitle, Spinner } from "@/components/ui";
+import { useApiMutation, useSettings } from "@/hooks/use-api";
+import type { Setting } from "@/types/models";
+
+export default function SettingsPage() {
+  const { data, isLoading } = useSettings();
+  const save = useApiMutation("put", [["settings"]]);
+  const testIg = useApiMutation("post", []);
+  const settings = (data ?? []) as Setting[];
+  const groups = settings.reduce<Record<string, Setting[]>>((acc, s) => {
+    (acc[s.category] ||= []).push(s);
+    return acc;
+  }, {});
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-4">
+      <h1 className="text-xl font-extrabold tracking-tight">Global settings</h1>
+      {isLoading ? <Spinner /> : Object.entries(groups).map(([cat, items]) => (
+        <Card key={cat}>
+          <CardTitle>{cat}</CardTitle>
+          {items.map((s) => (
+            <form
+              key={s.key}
+              className="flex items-center gap-2 border-t border-zinc-100 py-2 first:border-0 dark:border-zinc-800"
+              onSubmit={(e) => { e.preventDefault(); save.mutate({ url: `/settings/${s.key}`, body: (e.target as HTMLFormElement).value.value }); }}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-xs font-semibold">{s.key}</p>
+                <p className="truncate text-xs text-zinc-500">{s.is_sensitive ? "(sensitive â€” masked)" : s.value || "(empty)"}</p>
+              </div>
+              <input name="value" className="input !w-48" placeholder="new value" />
+              <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
+            </form>
+          ))}
+        </Card>
+      ))}
+      <Card>
+        <CardTitle>Connection tests</CardTitle>
+        <div className="flex gap-2">
+          <button className="btn-ghost flex-1" onClick={() => testIg.mutate({ url: "/settings/test-instagram" })}>Test Instagram</button>
+        </div>
+        {testIg.data && (
+          <pre className="mt-2 overflow-auto rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800">{JSON.stringify(testIg.data, null, 2)}</pre>
+        )}
+      </Card>
+    </div>
+  );
+}

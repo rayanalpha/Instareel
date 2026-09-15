@@ -1,0 +1,87 @@
+"use client";
+import { useState } from "react";
+import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { useApiMutation, useCaptions, useHashtags } from "@/hooks/use-api";
+import type { Caption, HashtagSet } from "@/types/models";
+
+export default function CaptionsPage() {
+  const [tab, setTab] = useState<"captions" | "hashtags">("captions");
+  const { data: caps, isLoading: l1 } = useCaptions();
+  const { data: tags, isLoading: l2 } = useHashtags();
+  const createCap = useApiMutation("post", [["captions"]]);
+  const delCap = useApiMutation("delete", [["captions"]]);
+  const createTag = useApiMutation("post", [["hashtags"]]);
+  const delTag = useApiMutation("delete", [["hashtags"]]);
+  const [cap, setCap] = useState({ name: "", content: "", category: "" });
+  const [tag, setTag] = useState({ name: "", tags: "" });
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-xl font-extrabold tracking-tight">Captions & hashtags</h1>
+      <div className="flex gap-2">
+        {(["captions", "hashtags"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === t ? "bg-emerald-600 text-white" : "btn-ghost"}`}>
+            {t === "captions" ? "Captions" : "Hashtags"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "captions" ? (
+        <>
+          <Card>
+            <CardTitle>New caption template</CardTitle>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Name"><input className="input" value={cap.name} onChange={(e) => setCap({ ...cap, name: e.target.value })} /></Field>
+              <Field label="Category"><input className="input" value={cap.category} onChange={(e) => setCap({ ...cap, category: e.target.value })} placeholder="optional" /></Field>
+              <div className="flex items-end"><button className="btn-primary w-full" disabled={!cap.name || !cap.content} onClick={() => { createCap.mutate({ url: "/captions", body: { ...cap, category: cap.category || null } }); setCap({ name: "", content: "", category: "" }); }}>Add</button></div>
+            </div>
+            <div className="mt-3"><Field label="Content (emoji + line breaks supported)"><textarea className="input" rows={3} value={cap.content} onChange={(e) => setCap({ ...cap, content: e.target.value })} /></Field></div>
+          </Card>
+          {l1 ? <Spinner /> : ((caps ?? []) as Caption[]).length === 0 ? <EmptyState title="No captions" /> : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {((caps ?? []) as Caption[]).map((c) => (
+                <Card key={c.id}>
+                  <div className="flex items-center gap-2">
+                    <strong>{c.name}</strong>
+                    {c.category && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">{c.category}</span>}
+                    <span className="ml-auto text-xs text-zinc-500">used {c.use_count}× · {c.avg_engagement ?? 0}% eng.</span>
+                  </div>
+                  <div className="mt-2 rounded-lg bg-zinc-50 p-3 text-sm whitespace-pre-wrap dark:bg-zinc-800/60">{c.content}</div>
+                  <div className="mt-2 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+                    <p className="font-semibold text-zinc-700 dark:text-zinc-300">Instagram preview</p>
+                    <p className="whitespace-pre-wrap"><strong>yourpage</strong> {c.content.slice(0, 140)}{c.content.length > 140 ? "…" : ""}</p>
+                  </div>
+                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete "${c.name}"?`)) delCap.mutate({ url: `/captions/${c.id}` }); }}>Delete</button>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <Card>
+            <CardTitle>New hashtag set</CardTitle>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Name"><input className="input" value={tag.name} onChange={(e) => setTag({ ...tag, name: e.target.value })} /></Field>
+              <Field label="Tags (comma separated)">
+                <input className="input" value={tag.tags} onChange={(e) => setTag({ ...tag, tags: e.target.value })} placeholder="#reels, #viral, …" />
+              </Field>
+              <div className="flex items-end"><button className="btn-primary w-full" disabled={!tag.name || !tag.tags} onClick={() => { createTag.mutate({ url: "/hashtags", body: tag }); setTag({ name: "", tags: "" }); }}>Add</button></div>
+            </div>
+          </Card>
+          {l2 ? <Spinner /> : ((tags ?? []) as HashtagSet[]).length === 0 ? <EmptyState title="No hashtag sets" /> : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {((tags ?? []) as HashtagSet[]).map((h) => (
+                <Card key={h.id}>
+                  <div className="flex items-center gap-2"><strong>{h.name}</strong><span className="ml-auto text-xs text-zinc-500">used {h.use_count}×</span></div>
+                  <p className="mt-2 text-sm text-sky-600 dark:text-sky-400">{h.tags}</p>
+                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete "${h.name}"?`)) delTag.mutate({ url: `/hashtags/${h.id}` }); }}>Delete</button>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

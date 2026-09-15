@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+data/
+media/raw/*
+media/processed/*
+media/thumbnails/*
+!media/.gitkeep
+!media/watermarks/.gitkeep
+backend/sessions/
+node_modules/
+frontend/.next/
+frontend/out/
+*.log
+.DS_Store
