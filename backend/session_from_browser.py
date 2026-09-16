@@ -9,16 +9,18 @@ Steps:
   3. Copy the value of the `sessionid` cookie.
   4. Run:
          python session_from_browser.py <ig_username> <sessionid_cookie>
-  5. Copy the produced sessions/<username>.json to the server:
-         backend/media/sessions/<username>.json
+  5. Copy the produced file (note: dots in the username become
+     underscores, e.g. deer.9693176 -> deer_9693176.json) to the server:
+         backend/media/sessions/<safe-username>.json
   6. Press "Test session" in the dashboard — it should report valid.
 """
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.utils.instagram_helpers import device_settings_for  # noqa: E402
+from app.utils.instagram_helpers import device_settings_for, session_path_for  # noqa: E402
 
 
 def main() -> None:
@@ -42,14 +44,14 @@ def main() -> None:
         print("Log into instagram.com again and copy the FULL sessionid value.")
         sys.exit(1)
 
-    out_dir = Path("sessions")
-    out_dir.mkdir(exist_ok=True)
-    out = out_dir / f"{username}.json"
+    # session_path_for joins root + "sessions", so pass cwd to get ./sessions/<safe>.json
+    out = Path(session_path_for(username, os.getcwd()))
+    out.parent.mkdir(parents=True, exist_ok=True)
     cl.dump_settings(str(out))
     print(f"\nOK — logged in as {cl.username}, session saved to {out}")
     print("Next steps:")
     print(f"  1. Copy {out} to the server as:")
-    print(f"     media/sessions/{username}.json")
+    print(f"     media/sessions/{out.name}")
     print("  2. In the dashboard press 'Test session' — it should say the session is valid.")
 
 
