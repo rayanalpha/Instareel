@@ -6,7 +6,7 @@ aiosqlite==0.20.0
 alembic==1.14.0
 celery[redis]==5.4.0
 redis==5.2.1
-instagrapi==2.1.3
+instagrapi==3.0.2
 python-telegram-bot==21.6
 pydantic>=2.9
 pydantic-settings==2.6.1
@@ -18,3 +18,5 @@ python-multipart==0.0.19
 aiofiles==24.1.0
 httpx==0.28.1
 psutil==6.1.0
+Pillow>=8.1.1
+curl-cffi>=0.15.0
