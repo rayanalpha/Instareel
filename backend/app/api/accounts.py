@@ -1,7 +1,9 @@
 """IG accounts CRUD + session management."""
 import datetime as dt
+import json
+import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,16 @@ from app.services.log_service import log_event
 
 router = APIRouter()
 
+MAX_SESSION_BYTES = 5 * 1024 * 1024
+
+
+def _has_session_file(username: str, session_file_path: str | None) -> bool:
+    from app.config import settings
+    from app.utils.instagram_helpers import session_path_for
+
+    path = session_file_path or session_path_for(username, settings.MEDIA_ROOT)
+    return bool(path) and os.path.exists(path)
+
 
 def _out(a: Account) -> AccountOut:
     return AccountOut(
@@ -22,6 +34,7 @@ def _out(a: Account) -> AccountOut:
         max_daily_posts=a.max_daily_posts, cooldown_until=a.cooldown_until,
         total_posts=a.total_posts, total_views=a.total_views, total_likes=a.total_likes,
         notes=a.notes, created_at=a.created_at, updated_at=a.updated_at,
+        has_session=_has_session_file(a.username, a.session_file_path),
     )
 
 
@@ -65,12 +78,16 @@ async def update_account(account_id: int, body: AccountUpdate, _: str = Depends(
     acc = await db.get(Account, account_id)
     if not acc:
         raise HTTPException(404, "Account not found")
+    # Sentinel: {"proxy_id": "none"} unlinks the proxy. Plain null = leave unchanged.
+    if body.proxy_id is not None:
+        if body.proxy_id == "none":
+            acc.proxy_id = None
+        else:
+            acc.proxy_id = int(body.proxy_id)
     if body.max_daily_posts is not None:
         acc.max_daily_posts = body.max_daily_posts
     if body.notes is not None:
         acc.notes = body.notes
-    if body.proxy_id is not None:
-        acc.proxy_id = body.proxy_id
     if body.status is not None:
         try:
             acc.status = AccountStatus(body.status)
@@ -152,6 +169,76 @@ async def test_session(account_id: int, _: str = Depends(get_current_admin)):
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         valid = pool.submit(InstagramService(proxy_url=purl, session_path=spath).check_session, username).result(timeout=120)
     return {"valid": valid}
+
+
+@router.post("/{account_id}/session")
+async def upload_session(
+    account_id: int,
+    file: UploadFile = File(...),
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(__import__("app.api.deps", fromlist=["get_db"]).get_db),
+):
+    """Upload a session JSON (created by manual_login.py / session_from_browser.py).
+
+    Validates the payload is a JSON object containing the fields instagrapi
+    needs (at minimum a cookies/authorization section), then stores it at the
+    account's canonical session path.
+    """
+    from app.config import settings
+    from app.utils.instagram_helpers import session_path_for
+
+    acc = await db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    raw = await file.read()
+    try:
+        await file.close()
+    except Exception:
+        pass
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    if len(raw) > MAX_SESSION_BYTES:
+        raise HTTPException(413, "Session file too large (max 5MB)")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(400, "File is not valid JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Session JSON must be an object")
+    keys = set(payload.keys())
+    if not ({"cookies", "authorization", "authorization_data", "uuids"} & keys):
+        raise HTTPException(
+            400,
+            "Not an instagrapi session file (missing cookies/authorization data). "
+            "Create it with backend/manual_login.py or session_from_browser.py.",
+        )
+    spath = session_path_for(acc.username, settings.MEDIA_ROOT)
+    tmp = spath + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    os.replace(tmp, spath)
+    acc.session_file_path = spath
+    await db.commit()
+    await db.refresh(acc)
+    await log_event("INFO", "account", f"Session uploaded for @{acc.username}")
+    return {"ok": True, "detail": f"Session saved ({len(raw)} bytes). Press 'Test session' to verify."}
+
+
+@router.delete("/{account_id}/session", status_code=204)
+async def delete_session(account_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(__import__("app.api.deps", fromlist=["get_db"]).get_db)):
+    acc = await db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    spath = acc.session_file_path
+    try:
+        if spath and os.path.exists(spath):
+            os.remove(spath)
+    except OSError:
+        pass
+    acc.session_file_path = None
+    await db.commit()
+    await log_event("INFO", "account", f"Session removed for @{acc.username}")
+    return None
 
 
 @router.post("/{account_id}/cooldown")

@@ -16,7 +16,7 @@ class AccountUpdate(BaseModel):
     max_daily_posts: int | None = Field(default=None, ge=1, le=20)
     notes: str | None = None
     status: str | None = None
-    proxy_id: int | None = None
+    proxy_id: int | str | None = None
 
 
 class AccountOut(BaseModel):
@@ -33,6 +33,7 @@ class AccountOut(BaseModel):
     total_views: int
     total_likes: int
     notes: str | None
+    has_session: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
 

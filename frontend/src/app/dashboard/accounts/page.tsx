@@ -1,22 +1,67 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
+import axios from "axios";
 import { Card, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
-import { useAccounts, useApiMutation } from "@/hooks/use-api";
+import { toast } from "@/components/toast";
+import { useAccounts, useApiMutation, useProxies } from "@/hooks/use-api";
+import { apiBase, authHeaders } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
-import type { Account } from "@/types/models";
+import type { Account, Proxy } from "@/types/models";
 
 export default function AccountsPage() {
   const { data, isLoading } = useAccounts();
+  const { data: proxies } = useProxies();
   const create = useApiMutation("post", [["accounts"]]);
   const remove = useApiMutation("delete", [["accounts"]]);
   const action = useApiMutation("post", [["accounts"]]);
+  const update = useApiMutation("put", [["accounts"]]);
   const [form, setForm] = useState({ username: "", password: "", max_daily_posts: 3 });
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploadTarget, setUploadTarget] = useState<number | null>(null);
   const accounts = (data ?? []) as Account[];
+  const proxyList = (proxies ?? []) as Proxy[];
+
+  function proxyLabel(p: Proxy): string {
+    const host = p.url.replace(/^https?:\/\//, "");
+    return `${p.protocol}://${host}${p.country ? ` (${p.country})` : ""}${p.is_healthy ? "" : " [down]"}`;
+  }
+
+  async function uploadSession(accountId: number, file: File) {
+    setUploadingId(accountId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const { data: res } = await axios.post(
+        `${apiBase()}/api/v1/accounts/${accountId}/session`,
+        formData,
+        { headers: { ...authHeaders(), "Content-Type": "multipart/form-data" }, timeout: 60000 }
+      );
+      toast("success", String(res.detail ?? "Session uploaded"));
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Session upload failed";
+      toast("error", String(msg));
+    } finally {
+      setUploadingId(null);
+      setUploadTarget(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-extrabold tracking-tight">Instagram accounts</h1>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && uploadTarget != null) uploadSession(uploadTarget, f);
+        }}
+      />
       <Card>
         <div className="grid gap-3 md:grid-cols-4">
           <Field label="Username"><input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="instagram_user" /></Field>
@@ -58,9 +103,40 @@ export default function AccountsPage() {
               <p className="mt-1 text-xs text-zinc-500">
                 {a.posts_today}/{a.max_daily_posts} today · {a.total_posts} total · {a.total_views} views · last post {timeAgo(a.last_post)}
               </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Session: {a.has_session
+                  ? <span className="font-semibold text-emerald-500">saved ✓</span>
+                  : <span className="font-semibold text-amber-500">missing</span>}
+                {" · "}Proxy: {a.proxy_id ? ` #${a.proxy_id}` : " none"}
+              </p>
+              <div className="mt-3">
+                <Field label="Proxy">
+                  <select
+                    className="input !py-1.5 text-xs"
+                    value={a.proxy_id ? String(a.proxy_id) : ""}
+                    disabled={update.isPending}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      update.mutate({ url: `/accounts/${a.id}`, body: { proxy_id: v === "" ? "none" as unknown as number : Number(v) } });
+                    }}
+                  >
+                    <option value="">No proxy</option>
+                    {proxyList.map((p) => (
+                      <option key={p.id} value={p.id}>{proxyLabel(p)}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {actBtn(`/accounts/${a.id}/login`, "Login")}
                 {actBtn(`/accounts/${a.id}/test-session`, "Test session")}
+                <button
+                  className="btn-ghost !px-3 !py-1.5 text-xs"
+                  disabled={uploadingId === a.id}
+                  onClick={() => { setUploadTarget(a.id); fileRef.current?.click(); }}
+                >
+                  {uploadingId === a.id ? "Uploading…" : "Upload session"}
+                </button>
                 {a.status === "active"
                   ? actBtn(`/accounts/${a.id}/cooldown`, "Cooldown")
                   : actBtn(`/accounts/${a.id}/activate`, "Activate")}

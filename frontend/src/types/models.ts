@@ -2,7 +2,7 @@ export interface Account {
   id: number; username: string; proxy_id: number | null; status: string;
   last_login: string | null; last_post: string | null; posts_today: number;
   max_daily_posts: number; cooldown_until: string | null; total_posts: number;
-  total_views: number; total_likes: number; notes: string | null;
+  total_views: number; total_likes: number; notes: string | null; has_session?: boolean;
 }
 
 export interface Video {
