@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header, MobileNav, Sidebar, TopBar } from "@/components/layout";
 import { Toaster } from "@/components/toast";
@@ -8,21 +8,25 @@ import { useRealtimeFeed } from "@/hooks/use-realtime";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { username, ready, setAuth } = useAuth();
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const { setAuth } = useAuth();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     if (!localStorage.getItem("access_token")) {
       router.replace("/login");
-    } else if (!username) {
+    } else if (!useAuth.getState().username) {
       setAuth(localStorage.getItem("username") ?? "admin");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Only read localStorage after mount so the server-rendered HTML (empty)
+  // matches the first client render — avoids React hydration errors #418/#423.
+  const token = mounted ? localStorage.getItem("access_token") : null;
   useRealtimeFeed(!!token);
 
-  if (!token) return null;
+  if (!mounted || !token) return null;
 
   return (
     <div className="flex min-h-screen">
@@ -32,8 +36,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <TopBar />
         <main className="flex-1 space-y-6 p-4 pb-20 md:p-6 md:pb-6">{children}</main>
       </div>
-        <Toaster />
-        <MobileNav />
+      <Toaster />
+      <MobileNav />
     </div>
   );
 }
