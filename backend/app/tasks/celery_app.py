@@ -30,3 +30,9 @@ celery.conf.beat_schedule = {
     "media-cleanup": {"task": "tasks.cleanup_tasks.clean_old_media", "schedule": crontab(hour=4, minute=0)},
     "reset-daily-counts": {"task": "tasks.account_tasks.reset_daily_counts", "schedule": crontab(hour=0, minute=0)},
 }
+
+# Explicit imports so workers always register tasks (autodiscover is
+# unreliable for the package that holds the Celery app itself, esp. on Windows).
+import app.tasks.periodic_tasks  # noqa: F401
+import app.tasks.post_tasks  # noqa: F401
+import app.tasks.video_tasks  # noqa: F401
