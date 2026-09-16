@@ -21,25 +21,44 @@ def _classify(exc: Exception) -> str:
     return "generic"
 
 
+def _safe_filename(settings_path: str) -> str:
+    """Return the raw JSON of a session file (or ''), for diagnostics."""
+    try:
+        with open(settings_path, encoding="utf-8") as f:
+            return f.read(200)
+    except OSError:
+        return ""
+
+
 class InstagramService:
     def __init__(self, proxy_url: str | None = None, session_path: str | None = None):
         self.proxy_url = proxy_url
         self.session_path = session_path
 
-    def _make_client(self, username: str):
+    def _make_client(self, username: str, session_first: bool = True):
         from instagrapi import Client
         from app.utils.instagram_helpers import device_settings_for
 
         cl = Client()
-        cl.set_device(device_settings_for(username))
         cl.delay_range = [1, 3]
         if self.proxy_url:
             cl.set_proxy(self.proxy_url)
-        if self.session_path:
+        loaded = False
+        if session_first and self.session_path:
+            # Load the saved session BEFORE set_device so the file's own
+            # device/uuid/cookies (not our generic fingerprint) win.
             try:
                 cl.load_settings(self.session_path)
-            except Exception:
-                log.info("No usable session file for %s", username)
+                loaded = bool(cl.settings)
+                if loaded:
+                    log.info("Loaded session file for %s", username)
+            except FileNotFoundError:
+                log.info("No session file yet for %s (path: %s)", username, self.session_path)
+            except Exception as exc:
+                log.warning("Session file for %s unreadable (%s); starting fresh", username, exc)
+        if not loaded:
+            # No usable session: fall back to the deterministic fingerprint.
+            cl.set_device(device_settings_for(username))
         return cl
 
     def login(self, username: str, password: str) -> tuple[bool, str]:
@@ -67,9 +86,11 @@ class InstagramService:
     def check_session(self, username: str) -> bool:
         cl = self._make_client(username)
         try:
-            cl.get_timeline_feed()
-            return True
-        except Exception:
+            ok = bool(cl.get_timeline_feed())
+            log.info("Session check for %s: %s", username, "valid" if ok else "empty response")
+            return ok
+        except Exception as exc:
+            log.warning("Session check for %s failed (%s): %s", username, _classify(exc), exc)
             return False
 
     def upload_reel(self, username: str, password: str, video_path: str, caption: str) -> tuple[str | None, str | None, str]:
