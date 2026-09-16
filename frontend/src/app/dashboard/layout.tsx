@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Header, MobileNav, Sidebar, TopBar } from "@/components/layout";
+import { Toaster } from "@/components/toast";
 import { useAuth } from "@/stores/stores";
 import { useRealtimeFeed } from "@/hooks/use-realtime";
 
@@ -31,7 +32,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <TopBar />
         <main className="flex-1 space-y-6 p-4 pb-20 md:p-6 md:pb-6">{children}</main>
       </div>
-      <MobileNav />
+        <Toaster />
+        <MobileNav />
     </div>
   );
 }

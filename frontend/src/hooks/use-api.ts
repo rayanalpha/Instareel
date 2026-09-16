@@ -1,10 +1,35 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { toast } from "@/components/toast";
 
 async function get<T = any>(url: string): Promise<T> {
   const { data } = await api.get(url);
   return data;
+}
+
+/** Show the API's own result payload as a toast so every action gives visible feedback. */
+function announce(data: unknown) {
+  if (!data || typeof data !== "object") return;
+  const d = data as Record<string, unknown>;
+  if (d.ok === false) {
+    toast("error", String(d.detail ?? d.error ?? "Operation failed"));
+  } else if (d.ok === true && "detail" in d) {
+    toast("success", String(d.detail));
+  } else if ("valid" in d) {
+    toast(d.valid ? "success" : "error", d.valid ? "Session is valid" : "Session invalid or expired");
+  } else if (d.queued === true) {
+    toast("info", "Queued — watch the worker logs / status");
+  } else if (typeof d.error === "string") {
+    toast("error", d.error);
+  }
+}
+
+function errorMessage(err: unknown): string {
+  const e = err as { response?: { data?: { detail?: unknown; message?: unknown; error?: unknown } }; message?: string };
+  const rd = e?.response?.data;
+  const detail = rd?.detail ?? rd?.message ?? rd?.error ?? e?.message;
+  return typeof detail === "string" ? detail : "Request failed";
 }
 
 export function useOverview(days = 30) {
@@ -58,12 +83,17 @@ export function useApiMutation(method: "post" | "put" | "delete", invalidate: st
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ url, body }: { url: string; body?: unknown }) => {
-      const { data } = await api.request({ method, url, data: body });
+      // Instagram-facing endpoints can take minutes; don't let axios kill the request at 30s.
+      const { data } = await api.request({ method, url, data: body, timeout: 180000 });
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      announce(data);
       for (const key of invalidate) qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (err) => {
+      toast("error", errorMessage(err));
     },
   });
 }

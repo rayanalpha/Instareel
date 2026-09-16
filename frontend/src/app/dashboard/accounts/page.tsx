@@ -36,7 +36,20 @@ export default function AccountsPage() {
         <EmptyState title="No accounts" hint="Add your first Instagram account above." />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {accounts.map((a) => (
+          {accounts.map((a) => {
+            const busyUrl = (action.variables as { url?: string } | undefined)?.url;
+            const busy = (u: string) => action.isPending && busyUrl === u;
+            const actBtn = (u: string, label: string) => (
+              <button
+                key={u}
+                className="btn-ghost !px-3 !py-1.5 text-xs"
+                disabled={action.isPending}
+                onClick={() => action.mutate({ url: u })}
+              >
+                {busy(u) ? "Working…" : label}
+              </button>
+            );
+            return (
             <Card key={a.id}>
               <div className="flex items-center gap-2">
                 <Link href={`/dashboard/accounts/${a.id}`} className="font-semibold hover:text-emerald-500">@{a.username}</Link>
@@ -46,20 +59,22 @@ export default function AccountsPage() {
                 {a.posts_today}/{a.max_daily_posts} today · {a.total_posts} total · {a.total_views} views · last post {timeAgo(a.last_post)}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => action.mutate({ url: `/accounts/${a.id}/login` })}>Login</button>
-                <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => action.mutate({ url: `/accounts/${a.id}/test-session` })}>Test session</button>
+                {actBtn(`/accounts/${a.id}/login`, "Login")}
+                {actBtn(`/accounts/${a.id}/test-session`, "Test session")}
                 {a.status === "active"
-                  ? <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => action.mutate({ url: `/accounts/${a.id}/cooldown` })}>Cooldown</button>
-                  : <button className="btn-ghost !px-3 !py-1.5 text-xs" onClick={() => action.mutate({ url: `/accounts/${a.id}/activate` })}>Activate</button>}
+                  ? actBtn(`/accounts/${a.id}/cooldown`, "Cooldown")
+                  : actBtn(`/accounts/${a.id}/activate`, "Activate")}
                 <button
                   className="btn-ghost !px-3 !py-1.5 text-xs text-red-500"
+                  disabled={remove.isPending}
                   onClick={() => { if (confirm(`Remove @${a.username}?`)) remove.mutate({ url: `/accounts/${a.id}` }); }}
                 >
                   Remove
                 </button>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
