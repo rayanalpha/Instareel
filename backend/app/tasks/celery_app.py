@@ -15,10 +15,6 @@ celery.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    task_routes={
-        "tasks.video_tasks.*": {"queue": "video"},
-        "tasks.post_tasks.*": {"queue": "posts"},
-    },
 )
 celery.autodiscover_tasks(["app.tasks"])
 
