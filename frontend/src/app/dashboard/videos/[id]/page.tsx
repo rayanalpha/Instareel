@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api, apiBase } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Card, CardTitle, Field, Spinner, StatusBadge } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
 import { useApiMutation, useEffects } from "@/hooks/use-api";
@@ -12,10 +12,15 @@ interface Detail {
   trim_end: number | null; failed_reason: string | null;
 }
 
+// Terminal states: nothing left to wait for — stop polling.
+const DONE_STATES = new Set(["processed", "posted", "failed", "archived"]);
+
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [video, setVideo] = useState<Detail | null>(null);
   const [progress, setProgress] = useState<{ percentage: number; stage: string } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState("");
   const [form, setForm] = useState({ effect_preset: "", trim_start: "", trim_end: "", add_watermark: true });
   const { data: effects } = useEffects();
   const save = useApiMutation("put", [["videos"]]);
@@ -34,9 +39,61 @@ export default function VideoDetailPage() {
       const s = await api.get(`/videos/${id}/status`);
       setProgress(s.data.progress);
     } catch { /* ignore */ }
+    return data as Detail;
   }
 
-  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [id]);
+  // Poll only while the video is in a transitional state.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+    (async () => {
+      const v = await load();
+      if (!cancelled && !DONE_STATES.has(v.status)) {
+        timer = setInterval(async () => {
+          const cur = await load();
+          if (DONE_STATES.has(cur.status) && timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+        }, 4000);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+    /* eslint-disable-next-line */
+  }, [id]);
+
+  // Fetch the preview through the same-origin /api proxy as a blob —
+  // <video> tags can't send the Authorization header, and cross-origin
+  // media requests get blocked by Chrome's ORB.
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPreviewUrl(null);
+    setPreviewError("");
+    (async () => {
+      try {
+        const res = await api.get(`/videos/${id}/preview`, {
+          responseType: "blob",
+          timeout: 120000,
+        });
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(res.data);
+        setPreviewUrl(objectUrl);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const status = (e as { response?: { status?: number } })?.response?.status;
+          setPreviewError(status === 404 ? "No preview file yet — process the video first." : "Preview failed to load.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, video?.status]);
 
   if (!video) return <Spinner />;
 
@@ -47,12 +104,18 @@ export default function VideoDetailPage() {
           <CardTitle>#{video.id} · {video.original_filename}</CardTitle>
           <StatusBadge status={video.status} />
         </div>
-        <LivePreview
-          key={`${video.status}-${form.effect_preset}-${form.add_watermark}`}
-          src={`${apiBase()}/api/v1/videos/${id}/preview`}
-          effectName={form.effect_preset}
-          watermark={form.add_watermark}
-        />
+        {previewUrl ? (
+          <LivePreview
+            key={`${video.status}-${form.effect_preset}-${form.add_watermark}`}
+            src={previewUrl}
+            effectName={form.effect_preset}
+            watermark={form.add_watermark}
+          />
+        ) : (
+          <div className="flex aspect-[9/16] max-h-[560px] items-center justify-center rounded-lg bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-800">
+            {previewError || "Loading preview…"}
+          </div>
+        )}
         <p className="mt-2 text-xs text-zinc-500">Preview shows the selected effect (CSS approximation) and watermark overlay live.</p>
         {video.status === "processing" && (
           <div className="mt-3">
@@ -61,6 +124,15 @@ export default function VideoDetailPage() {
             </div>
             <p className="mt-1 text-xs text-zinc-500">{progress?.stage ?? "processing"} · {(progress?.percentage ?? 0).toFixed(0)}%</p>
           </div>
+        )}
+        {video.status === "uploaded" && (
+          <button
+            className="btn-primary mt-3 w-full"
+            disabled={process.isPending}
+            onClick={async () => { await process.mutateAsync({ url: `/videos/${id}/process` }); load(); }}
+          >
+            {process.isPending ? "Queuing…" : "Start processing"}
+          </button>
         )}
         {video.failed_reason && <p className="mt-2 text-sm text-red-500">{video.failed_reason}</p>}
       </Card>

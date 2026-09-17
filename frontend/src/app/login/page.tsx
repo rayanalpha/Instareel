@@ -1,9 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { Clapperboard } from "lucide-react";
-import { apiBase } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/stores/stores";
 
 export default function LoginPage() {
@@ -19,7 +18,8 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
     try {
-      const { data } = await axios.post(`${apiBase()}/api/v1/auth/login`, { username, password });
+      // Same-origin: Next.js rewrites /api/* to FastAPI (no CORS).
+      const { data } = await api.post(`/auth/login`, { username, password });
       localStorage.setItem("access_token", data.access_token);
       localStorage.setItem("refresh_token", data.refresh_token);
       setAuth(username);

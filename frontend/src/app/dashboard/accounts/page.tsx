@@ -1,11 +1,10 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { Card, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useAccounts, useApiMutation, useProxies } from "@/hooks/use-api";
-import { apiBase, authHeaders } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import type { Account, Proxy } from "@/types/models";
 
@@ -33,11 +32,10 @@ export default function AccountsPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const { data: res } = await axios.post(
-        `${apiBase()}/api/v1/accounts/${accountId}/session`,
-        formData,
-        { headers: { ...authHeaders(), "Content-Type": "multipart/form-data" }, timeout: 60000 }
-      );
+      const { data: res } = await api.post(`/accounts/${accountId}/session`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000,
+      });
       toast("success", String(res.detail ?? "Session uploaded"));
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Session upload failed";

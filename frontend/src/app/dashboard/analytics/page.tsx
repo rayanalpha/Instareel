@@ -3,9 +3,8 @@ import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardTitle, Spinner } from "@/components/ui";
 import { useAccounts, useOverview } from "@/hooks/use-api";
-import { apiBase, authHeaders } from "@/lib/api";
+import { api } from "@/lib/api";
 import { fmt } from "@/lib/utils";
-import axios from "axios";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
@@ -13,7 +12,7 @@ export default function AnalyticsPage() {
   const { data: accounts } = useAccounts();
 
   async function exportCsv() {
-    const { data: csv } = await axios.get(`${apiBase()}/api/v1/analytics/export`, { headers: authHeaders() });
+    const { data: csv } = await api.get(`/analytics/export`);
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

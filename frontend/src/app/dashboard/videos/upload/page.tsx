@@ -1,12 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
+import { api } from "@/lib/api";
 import { UploadCloud } from "lucide-react";
 import { Card, Field } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
 import { useEffects } from "@/hooks/use-api";
-import { apiBase, authHeaders } from "@/lib/api";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -36,19 +35,18 @@ export default function UploadPage() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const { data } = await axios.post(`${apiBase()}/api/v1/videos/upload`, form, {
-        headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
+      const { data } = await api.post(`/videos/upload`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
         timeout: 600000,
       });
       // Persist the preview choices as the video's processing settings.
       try {
-        await axios.put(
-          `${apiBase()}/api/v1/videos/${data.id}/settings`,
+        await api.put(
+          `/videos/${data.id}/settings`,
           {
             effect_preset: effect || null,
             add_watermark: watermark,
           },
-          { headers: authHeaders() }
         );
       } catch {
         /* settings save is best-effort; processing still proceeds */

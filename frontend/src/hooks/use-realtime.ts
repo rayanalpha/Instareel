@@ -11,6 +11,18 @@ const EVENTS = [
   "new_log",
 ];
 
+/** Resolve the WebSocket URL: same-origin in the browser when no API host
+ * is configured (avoids cross-origin WS issues entirely). */
+function wsBase(): string {
+  if (typeof window !== "undefined") {
+    const host = apiBase();
+    if (host) return host.replace(/^http/, "ws");
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${proto}://${window.location.host}`;
+  }
+  return "";
+}
+
 /** Opens an authenticated WS feed; invalidates related queries on events (polling fallback lives in hooks). */
 export function useRealtimeFeed(enabled: boolean) {
   const qc = useQueryClient();
@@ -25,7 +37,7 @@ export function useRealtimeFeed(enabled: boolean) {
       const token = localStorage.getItem("access_token");
       if (!token) return;
       try {
-        ws = new WebSocket(`${apiBase().replace(/^http/, "ws")}/ws?token=${encodeURIComponent(token)}`);
+        ws = new WebSocket(`${wsBase()}/ws?token=${encodeURIComponent(token)}`);
       } catch {
         return;
       }
