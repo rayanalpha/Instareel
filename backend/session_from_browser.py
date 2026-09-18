@@ -96,6 +96,10 @@ def main() -> None:
     ap.add_argument("--cookies-file", default=None, help="Netscape cookies.txt or JSON export")
     ap.add_argument("--proxy", default=None, help="optional proxy URL for verification")
     ap.add_argument("--retries", type=int, default=2, help="transient-error retries (default: 2)")
+    ap.add_argument("--no-verify", action="store_true",
+                    help="skip the pre-save timeline proof call (gentle mode: for accounts "
+                         "where any extra API call gets sessions killed; the username "
+                         "ownership check and file round-trip still apply)")
     args = ap.parse_args()
 
     username = (args.username or "").strip().lstrip("@")
@@ -146,12 +150,18 @@ def main() -> None:
              "then copy its sessionid — or fix the username argument.")
 
     # ---- 4. prove it with a real API call BEFORE saving ----
-    try:
-        cl.get_timeline_feed()
-    except Exception as exc:  # noqa: BLE001
-        fail(f"Session logged in but API calls fail ({classify_error(exc)}): {exc}",
-             "The cookie is half-valid (auth ok, API blocked). Complete any checkpoint "
-             "in the browser, copy a fresh sessionid, and retry.")
+    # (skipped in --no-verify gentle mode: on hijack-sensitive accounts the
+    # extra call itself can get all sessions killed)
+    if not args.no_verify:
+        try:
+            cl.get_timeline_feed()
+        except Exception as exc:  # noqa: BLE001
+            fail(f"Session logged in but API calls fail ({classify_error(exc)}): {exc}",
+                 "The cookie is half-valid (auth ok, API blocked). Complete any checkpoint "
+                 "in the browser, copy a fresh sessionid, and retry — or rerun this same "
+                 "command with --no-verify for one minimal-footprint attempt.")
+    else:
+        print("Gentle mode: skipping timeline proof (username match already confirmed).")
 
     # ---- 5. save with the exact filename the server expects ----
     out = Path(session_path_for(username, os.getcwd()))
