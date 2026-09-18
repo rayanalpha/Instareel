@@ -20,6 +20,30 @@ def _classify(exc: Exception) -> str:
     return "generic"
 
 
+def _feed_with_retry(cl) -> "tuple[bool, str]":
+    """Timeline check that survives network blips without a fresh login.
+
+    A fresh login is the strongest automation signal, so a transient network
+    error must not trigger one: auth failures return immediately, anything
+    else gets one retry after 5s. Returns (ok, kind).
+    """
+    import time
+
+    try:
+        cl.get_timeline_feed()
+        return True, ""
+    except Exception as exc:
+        kind = _classify(exc)
+        if kind in ("challenge", "login_required"):
+            return False, kind
+        time.sleep(5)
+        try:
+            cl.get_timeline_feed()
+            return True, ""
+        except Exception as exc2:
+            return False, _classify(exc2)
+
+
 def _safe_filename(settings_path: str) -> str:
     """Return the raw JSON of a session file (or ''), for diagnostics."""
     try:
@@ -67,12 +91,11 @@ class InstagramService:
         cl = self._make_client(username)
         try:
             if self.session_path and os.path.exists(self.session_path):
-                try:
-                    cl.get_timeline_feed()  # cheap session validity check
+                ok, _ = _feed_with_retry(cl)  # cheap session validity check
+                if ok:
                     log.info("Reused session for %s", username)
                     return True, "session_reused"
-                except Exception:
-                    log.info("Stored session invalid for %s — logging in fresh", username)
+                log.info("Stored session invalid for %s — logging in fresh", username)
             cl.login(username, password)
             if self.session_path:
                 cl.dump_settings(self.session_path)
@@ -85,8 +108,8 @@ class InstagramService:
     def check_session(self, username: str) -> bool:
         cl = self._make_client(username)
         try:
-            ok = bool(cl.get_timeline_feed())
-            log.info("Session check for %s: %s", username, "valid" if ok else "empty response")
+            ok, kind = _feed_with_retry(cl)
+            log.info("Session check for %s: %s", username, "valid" if ok else f"invalid ({kind})")
             return ok
         except Exception as exc:
             log.warning("Session check for %s failed (%s): %s", username, _classify(exc), exc)
@@ -96,9 +119,8 @@ class InstagramService:
         """Blocking. Returns (media_id, permalink, error)."""
         cl = self._make_client(username)
         try:
-            try:
-                cl.get_timeline_feed()
-            except Exception:
+            ok, _ = _feed_with_retry(cl)
+            if not ok:
                 cl.login(username, password)
                 if self.session_path:
                     try:
@@ -118,9 +140,8 @@ class InstagramService:
     def apply_bio(self, username: str, password: str, biography: str, external_url: str) -> str:
         cl = self._make_client(username)
         try:
-            try:
-                cl.get_timeline_feed()
-            except Exception:
+            ok, _ = _feed_with_retry(cl)
+            if not ok:
                 cl.login(username, password)
             cl.account_edit(biography=biography, external_url=external_url or "")
             if self.session_path:

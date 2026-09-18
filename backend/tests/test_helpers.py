@@ -209,6 +209,63 @@ class TestAccountHealthPolicy:
         assert [p["name"] for p in partial] == names[5:]
 
 
+class TestFeedRetry:
+    def _feed(self):
+        from app.services.instagram_service import _feed_with_retry
+
+        return _feed_with_retry
+
+    def test_healthy_session_no_sleep(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("time.sleep", lambda s: calls.append(s))
+
+        class Cl:
+            def get_timeline_feed(self):
+                return {"ok": True}
+
+        assert self._feed()(Cl()) == (True, "")
+        assert calls == []
+
+    def test_auth_failure_fails_fast(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("time.sleep", lambda s: calls.append(s))
+
+        class Cl:
+            def get_timeline_feed(self):
+                raise Exception("login_required: need login")
+
+        ok, kind = self._feed()(Cl())
+        assert ok is False and kind == "login_required"
+        assert calls == []  # no point retrying auth — go straight to login
+
+    def test_network_blip_retried_once_then_ok(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("time.sleep", lambda s: calls.append(s))
+        state = {"n": 0}
+
+        class Cl:
+            def get_timeline_feed(self):
+                state["n"] += 1
+                if state["n"] == 1:
+                    raise ConnectionError("reset by peer")
+                return {"ok": True}
+
+        assert self._feed()(Cl()) == (True, "")
+        assert calls == [5]
+
+    def test_persistent_outage_returns_last_kind(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("time.sleep", lambda s: calls.append(s))
+
+        class Cl:
+            def get_timeline_feed(self):
+                raise TimeoutError("timed out")
+
+        ok, kind = self._feed()(Cl())
+        assert ok is False and kind == "generic"
+        assert calls == [5]
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

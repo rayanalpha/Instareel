@@ -8,8 +8,18 @@ from app.tasks.celery_app import celery
 log = logging.getLogger("igfunnel.tasks")
 
 
+# Max posts refreshed per analytics run — the rest wait for the next 4h
+# tick. Bounds IG API calls and spreads them instead of bursting.
+MAX_ANALYTICS_PER_RUN = 20
+# Skip posts checked more recently than this (hours).
+ANALYTICS_MIN_INTERVAL_HOURS = 3
+
+
 @celery.task(name="tasks.analytics_tasks.fetch_all_analytics")
 def fetch_all_analytics():
+    import random
+    import time
+
     from sqlalchemy import select
 
     from app.config import settings
@@ -22,16 +32,29 @@ def fetch_all_analytics():
     from app.utils.instagram_helpers import session_path_for
 
     try:
-        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
+        # Jitter the start so runs don't hit IG at the exact same minute daily.
+        time.sleep(random.uniform(0, 90))
+        now = dt.datetime.now(dt.timezone.utc)
+        cutoff = now - dt.timedelta(days=7)
+        recent = now - dt.timedelta(hours=ANALYTICS_MIN_INTERVAL_HOURS)
         with SyncSessionLocal() as s:
             posts = (
                 s.execute(
-                    select(Post).where(Post.status == PostStatus.posted, Post.posted_at >= cutoff)
+                    select(Post)
+                    .where(Post.status == PostStatus.posted, Post.posted_at >= cutoff)
+                    .order_by(Post.last_analytics_check.asc().nulls_first())
+                    .limit(MAX_ANALYTICS_PER_RUN * 2)
                 )
             ).scalars().all()
-            items = [(p.id, p.account_id, p.ig_media_id, p.posted_at) for p in posts]
+            items = [
+                (p.id, p.account_id, p.ig_media_id, p.posted_at)
+                for p in posts
+                if p.last_analytics_check is None or p.last_analytics_check <= recent
+            ][:MAX_ANALYTICS_PER_RUN]
         updated = 0
         for pid, acc_id, media_id, posted_at in items:
+            # Human-like pacing between API calls instead of a tight loop.
+            time.sleep(random.uniform(3, 10))
             if not media_id:
                 continue
             try:
