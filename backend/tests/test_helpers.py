@@ -103,6 +103,36 @@ class TestProbeParsing:
         assert info["has_audio"] is False
 
 
+class TestDefaultEffects:
+    def test_names_unique_and_valid(self):
+        from app.services.default_effects import DEFAULT_EFFECT_PRESETS
+
+        names = [p["name"] for p in DEFAULT_EFFECT_PRESETS]
+        assert len(names) >= 10
+        assert len(set(names)) == len(names)
+        for name in names:
+            assert 1 <= len(name) <= 128
+            assert all(c.isalnum() or c in "-_" for c in name)
+
+    def test_filters_are_single_chain_safe(self):
+        from app.services.default_effects import DEFAULT_EFFECT_PRESETS
+
+        for p in DEFAULT_EFFECT_PRESETS:
+            f = p["ffmpeg_filter"]
+            assert f.strip(), p["name"]
+            # Must compose inside [0:v]...[outv]: no graph separators/labels.
+            assert ";" not in f and "[" not in f and "]" not in f, p["name"]
+
+    def test_every_preset_builds_a_command(self):
+        from app.services.default_effects import DEFAULT_EFFECT_PRESETS
+
+        for p in DEFAULT_EFFECT_PRESETS:
+            fc, _ = build_filter(effect_filter=p["ffmpeg_filter"])
+            assert "crop=ih*9/16" in fc and "scale=720:1280" in fc, p["name"]
+            cmd = build_command("in.mp4", "out.mp4", effect_filter=p["ffmpeg_filter"])
+            assert "libx264" in " ".join(cmd), p["name"]
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

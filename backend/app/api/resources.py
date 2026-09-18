@@ -203,6 +203,15 @@ async def check_all(_: str = Depends(get_current_admin)):
 @effect_router.get("", response_model=list[EffectOut])
 async def list_effects(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(EffectPreset).order_by(EffectPreset.name))).scalars().all()
+    if not rows:
+        # First visit seeds the built-in professional presets so the admin
+        # can just pick one — no manual FFmpeg entry needed.
+        from app.services.default_effects import DEFAULT_EFFECT_PRESETS
+
+        for preset in DEFAULT_EFFECT_PRESETS:
+            db.add(EffectPreset(**preset))
+        await db.commit()
+        rows = (await db.execute(select(EffectPreset).order_by(EffectPreset.name))).scalars().all()
     return [EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=e.avg_engagement) for e in rows]
 
 

@@ -23,7 +23,7 @@ export default function EffectsPage() {
         </div>
         <div className="mt-3"><Field label="FFmpeg video filter (applied after crop/scale)"><input className="input font-mono text-xs" value={form.ffmpeg_filter} onChange={(e) => setForm({ ...form, ffmpeg_filter: e.target.value })} placeholder="eq=saturation=1.2:contrast=1.05,unsharp=5:5:0.5" /></Field></div>
       </Card>
-      {isLoading ? <Spinner /> : effects.length === 0 ? <EmptyState title="No presets" hint="Leave empty to seed defaults, or add your own FFmpeg filters." /> : (
+      {isLoading ? <Spinner /> : effects.length === 0 ? <EmptyState title="No presets" hint="Reload to seed the built-in professional presets, or add your own FFmpeg filters." /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {effects.map((e) => (
             <Card key={e.id}>

@@ -72,12 +72,29 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
     from app.tasks.sync_helpers import log_event_sync, set_progress_sync
 
     with SyncSessionLocal() as s:
+        from sqlalchemy import select
+
+        from app.models import EffectPreset
+
         video = s.get(Video, video_id)
         if not video:
             raise ValueError(f"Video {video_id} not found")
         raw_path = video.raw_path
         trim_start, trim_end = video.trim_start, video.trim_end
         effect_preset = video.effect_preset
+        if not effect_filter and effect_preset:
+            # effect_preset stores the preset NAME — resolve to its filter.
+            preset = s.execute(
+                select(EffectPreset).where(
+                    EffectPreset.name == effect_preset,
+                    EffectPreset.is_active.is_(True),
+                )
+            ).scalars().first()
+            if preset:
+                effect_preset = preset.ffmpeg_filter or ""
+            else:
+                # Unknown name (e.g. deleted preset) — never feed it to FFmpeg.
+                effect_preset = ""
         custom_filters = video.custom_filters
         add_watermark = video.add_watermark
         video.status = VideoStatus.processing

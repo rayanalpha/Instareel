@@ -35,11 +35,25 @@ def process_video_task(self, video_id: int, effect_filter: str = "", color_grade
         mark(VideoStatus.processing)
         if not effect_filter:
             with SyncSessionLocal() as s:
-                presets = s.execute(
-                    select(EffectPreset).where(EffectPreset.is_active.is_(True))
-                ).scalars().all()
-                if presets:
-                    effect_filter = random.choice(presets).ffmpeg_filter or ""
+                video = s.get(Video, video_id)
+                chosen_name = (video.effect_preset or "").strip() if video else ""
+                if chosen_name:
+                    # The video stores the preset NAME — resolve it to the
+                    # real FFmpeg filter (never feed the raw name to FFmpeg).
+                    preset = s.execute(
+                        select(EffectPreset).where(
+                            EffectPreset.name == chosen_name,
+                            EffectPreset.is_active.is_(True),
+                        )
+                    ).scalars().first()
+                    if preset:
+                        effect_filter = preset.ffmpeg_filter or ""
+                if not effect_filter:
+                    presets = s.execute(
+                        select(EffectPreset).where(EffectPreset.is_active.is_(True))
+                    ).scalars().all()
+                    if presets:
+                        effect_filter = random.choice(presets).ffmpeg_filter or ""
         process_video_sync(video_id, effect_filter, color_grade)
         publish_sync("video_processing_complete", {"video_id": video_id, "status": "processed"})
         log_event_sync("INFO", "video", f"Video {video_id} processed successfully")

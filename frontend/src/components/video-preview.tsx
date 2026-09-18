@@ -6,13 +6,18 @@ import { useEffect, useState } from "react";
  * the real filter runs server-side during processing).
  */
 export const EFFECT_CSS: Record<string, string> = {
-  warm_filter: "saturate(1.3) brightness(1.05) sepia(0.15)",
-  cool_filter: "saturate(1.1) hue-rotate(-12deg) brightness(1.02)",
-  vintage_filter: "saturate(0.75) contrast(1.05) sepia(0.35)",
-  boost_filter: "saturate(1.5) contrast(1.12) brightness(1.03)",
-  sharp_clean: "contrast(1.05) saturate(1.1)",
-  soft_glow: "brightness(1.06) saturate(1.15) blur(0.3px)",
-  noir_filter: "grayscale(1) contrast(1.15)",
+  clean_natural: "saturate(1.08) contrast(1.02)",
+  vivid_pop: "saturate(1.6) contrast(1.15) brightness(1.02)",
+  warm_sunset: "saturate(1.25) contrast(1.05) sepia(0.18) brightness(1.02)",
+  golden_hour: "saturate(1.35) contrast(1.06) sepia(0.28) brightness(1.04)",
+  cool_morning: "saturate(1.1) hue-rotate(-12deg) brightness(1.02)",
+  teal_orange: "saturate(1.3) contrast(1.08) hue-rotate(-8deg)",
+  cinematic: "saturate(0.85) contrast(1.12) brightness(0.98)",
+  moody_dark: "saturate(0.75) contrast(1.15) brightness(0.95)",
+  vintage_film: "saturate(0.7) contrast(1.05) sepia(0.4)",
+  noir: "grayscale(1) contrast(1.2)",
+  pastel_soft: "saturate(0.8) contrast(0.92) brightness(1.05) blur(0.3px)",
+  sharp_pro: "contrast(1.06) saturate(1.12)",
 };
 
 const PLACEHOLDER_SVG =
