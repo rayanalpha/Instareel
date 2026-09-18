@@ -290,6 +290,10 @@ async def schedule_post(body: SchedulePostIn, _: str = Depends(get_current_admin
         raise HTTPException(404, "Video not found")
     if v.status != VideoStatus.processed:
         raise HTTPException(400, f"Video must be processed first (now: {v.status.value})")
+    from app.services import scheduler_service as sched_async
+
+    if await sched_async.video_already_queued(db, body.video_id):
+        raise HTTPException(400, "Video already has a pending post")
     account_id = body.account_id
     if not account_id:
         from app.services import scheduler_service

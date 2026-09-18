@@ -89,6 +89,18 @@ async def next_video(session, effect: str | None = None) -> Video | None:
     return video
 
 
+async def video_already_queued(session, video_id: int, window_min: int = 10) -> bool:
+    """Async mirror of tasks.sync_helpers.video_already_queued (API use)."""
+    now = _now()
+    q = select(func.count(Post.id)).where(
+        Post.video_id == video_id,
+        Post.status == PostStatus.scheduled,
+        Post.scheduled_for >= now - dt.timedelta(minutes=window_min),
+        Post.scheduled_for <= now + dt.timedelta(minutes=window_min),
+    )
+    return ((await session.execute(q)).scalar() or 0) > 0
+
+
 async def already_scheduled(session, rule: ScheduleRule, window_min: int = 10) -> bool:
     """Avoid double-scheduling when beat fires twice in the same window."""
     now = _now()

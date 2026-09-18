@@ -6,6 +6,8 @@ import json
 import os
 import sys
 
+from sqlalchemy import select
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("FERNET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
@@ -319,7 +321,6 @@ class TestPostClaim:
         from app.tasks.sync_helpers import claim_post
 
         s = self._session()
-        import datetime as dt
 
         for st in ("posting", "posted", "failed"):
             _, _, pid = self._seed_post(s, status=st)
@@ -354,6 +355,112 @@ class TestPostClaim:
         _, vid2, _ = self._seed_post(s, when=far)
         assert video_already_queued(s, vid2) is False
         assert video_already_queued(s, vid2, window_min=180) is True
+
+
+class TestSiblingGuard:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def _video_and_posts(self, s, sibling_status="posting", sibling_age_h=0):
+        import datetime as dt
+        from sqlalchemy import update
+
+        from app.models import Account, Post, PostStatus, Video
+
+        TestPostClaim._seq += 1
+        tag = TestPostClaim._seq
+        s.add_all([
+            Account(username=f"sib{tag}", password_enc="x"),
+            Video(original_filename="b.mp4", raw_path="/tmp/b.mp4", md5_hash=f"sib{tag}"),
+        ])
+        s.flush()
+        acc = s.execute(select(Account).where(Account.username == f"sib{tag}")).scalar_one()
+        vid = s.execute(select(Video).where(Video.md5_hash == f"sib{tag}")).scalar_one()
+        now = dt.datetime.now(dt.timezone.utc)
+        mine = Post(video_id=vid.id, account_id=acc.id, status=PostStatus.posting, scheduled_for=now)
+        sib = Post(video_id=vid.id, account_id=acc.id, status=PostStatus[sibling_status], scheduled_for=now)
+        s.add_all([mine, sib])
+        s.commit()
+        if sibling_age_h:
+            old = now - dt.timedelta(hours=sibling_age_h)
+            s.execute(update(Post).where(Post.id == sib.id).values(updated_at=old))
+            s.commit()
+            s.expire_all()
+        return mine.id, vid.id
+
+    def test_fresh_posting_sibling_blocks(self):
+        from app.tasks.sync_helpers import find_blocking_sibling
+
+        s = self._session()
+        mine, vid = self._video_and_posts(s, "posting")
+        sib = find_blocking_sibling(s, mine, vid)
+        assert sib is not None and sib.status.value == "posting"
+
+    def test_posted_sibling_blocks(self):
+        from app.tasks.sync_helpers import find_blocking_sibling
+
+        s = self._session()
+        mine, vid = self._video_and_posts(s, "posted")
+        assert find_blocking_sibling(s, mine, vid) is not None
+
+    def test_stale_posting_sibling_ignored(self):
+        from app.tasks.sync_helpers import find_blocking_sibling
+
+        s = self._session()
+        mine, vid = self._video_and_posts(s, "posting", sibling_age_h=3)
+        assert find_blocking_sibling(s, mine, vid) is None
+
+    def test_nonblocking_statuses_and_self(self):
+        from app.tasks.sync_helpers import find_blocking_sibling
+
+        s = self._session()
+        for st in ("scheduled", "failed"):
+            mine, vid = self._video_and_posts(s, st)
+            assert find_blocking_sibling(s, mine, vid) is None, st
+        # Self is never its own blocker.
+        mine2, vid2 = self._video_and_posts(s, "failed")
+        assert find_blocking_sibling(s, mine2, vid2) is None
+
+    def test_async_mirror_matches_sync(self):
+        import asyncio
+        import datetime as dt
+
+        async def go():
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from app.database import Base
+            from app.models import Account, Post, PostStatus, Video
+            from app.services import scheduler_service
+
+            engine = create_async_engine("sqlite+aiosqlite://")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as s:
+                s.add_all([
+                    Account(username="am1", password_enc="x"),
+                    Video(original_filename="c.mp4", raw_path="/tmp/c.mp4", md5_hash="am1"),
+                ])
+                await s.flush()
+                acc_id = (await s.execute(select(Account).where(Account.username == "am1"))).scalar_one().id
+                vid_id = (await s.execute(select(Video).where(Video.md5_hash == "am1"))).scalar_one().id
+                s.add(Post(
+                    video_id=vid_id, account_id=acc_id, status=PostStatus.scheduled,
+                    scheduled_for=dt.datetime.now(dt.timezone.utc),
+                ))
+                await s.commit()
+                assert await scheduler_service.video_already_queued(s, vid_id) is True
+                assert await scheduler_service.video_already_queued(s, vid_id + 999) is False
+            await engine.dispose()
+
+        asyncio.run(go())
 
 
 class TestCrypto:

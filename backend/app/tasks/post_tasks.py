@@ -168,6 +168,19 @@ def execute_post(self, post_id: int):
                     s.commit()
                 publish_sync("post_status_update", {"post_id": post_id, "status": "failed"})
                 return {"post_id": post_id, "status": "failed", "error": f"missing {', '.join(missing)}"}
+            sibling = sched.find_blocking_sibling(s, post_id, video.id)
+            if sibling is not None:
+                # Another post row targets the same video and is in flight or
+                # done — abort instead of double-uploading. Fail-closed: in the
+                # narrow double-claim race both abort and the next tick
+                # re-queues the video exactly once via the reservation.
+                post.status = PostStatus.failed
+                post.fail_reason = (
+                    f"Superseded: video already handled by post #{sibling.id} ({sibling.status.value})"
+                )
+                s.commit()
+                publish_sync("post_status_update", {"post_id": post_id, "status": "failed"})
+                return {"post_id": post_id, "status": "failed", "error": "duplicate-superseded"}
             caption, tags, retries = post.caption, post.hashtags, post.retry_count
             video_id = video.id
             username, password = account.username, decrypt_secret(account.password_enc)

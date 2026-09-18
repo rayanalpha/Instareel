@@ -264,7 +264,8 @@ def claim_post(session, post_id: int) -> str:
 
     One UPDATE ... WHERE status=scheduled so concurrent workers, beat
     redelivery and celery retries can never upload the same post twice.
-    Returns 'claimed' | 'missing' | 'busy'. Commits on claim.
+    Returns 'claimed' | 'missing' | 'busy'. Commits — call with a fresh
+    session (never one holding uncommitted work you intend to roll back).
     """
     from sqlalchemy import update
 
@@ -298,6 +299,45 @@ def video_already_queued(session, video_id: int, window_min: int = 10) -> bool:
         Post.scheduled_for <= now + dt.timedelta(minutes=window_min),
     )
     return (session.execute(q).scalar() or 0) > 0
+
+
+#: A 'posting' sibling older than this is a crashed worker's leftover — it
+#: must not wedge the video forever (see find_blocking_sibling).
+SIBLING_STALE_HOURS = 2
+
+
+def find_blocking_sibling(session, post_id: int, video_id: int, now: "dt.datetime | None" = None):
+    """Another post for the same video already in flight or done (or None).
+
+    Fail-closed executor guard: if two different Post rows ever target one
+    video (e.g. manual API double-scheduling), the loser aborts instead of
+    double-uploading. A stale 'posting' sibling (crashed worker, older than
+    SIBLING_STALE_HOURS) is ignored so one crash can't block the video.
+    """
+    from app.models import Post, PostStatus
+
+    now = now or _now()
+    rows = (
+        session.execute(
+            select(Post).where(
+                Post.video_id == video_id,
+                Post.id != post_id,
+                Post.status.in_([PostStatus.posting, PostStatus.posted]),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for sib in rows:
+        if sib.status == PostStatus.posted:
+            return sib
+        ts = sib.updated_at
+        if ts is not None:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=dt.timezone.utc)
+            if (now - ts).total_seconds() < SIBLING_STALE_HOURS * 3600:
+                return sib
+    return None
 
 
 def already_scheduled(session, rule, window_min: int = 10) -> bool:
