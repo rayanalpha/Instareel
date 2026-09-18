@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { EFFECT_CSS, drawWatermark, useWatermarkImage } from "@/components/video-preview";
 
 /**
@@ -30,7 +30,6 @@ export function LivePreview({
     if (!video || !canvas) return;
     let raf = 0;
     let running = false;
-    let lastDrawn = -1;
 
     const draw = () => {
       const w = video.clientWidth;
@@ -41,7 +40,6 @@ export function LivePreview({
       }
       if (watermark && wm) {
         drawWatermark(canvas, wm);
-        lastDrawn = video.currentTime;
       }
       // Keep looping only while the frame is actually moving; idle → stop.
       if (!video.paused && !video.ended) {
@@ -68,29 +66,41 @@ export function LivePreview({
             canvas.height = h;
           }
           drawWatermark(canvas, wm);
-          lastDrawn = video.currentTime;
         }
       } else {
         canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
       }
     };
 
-    video.addEventListener("play", () => { force(); start(); });
+    // Stable handler refs so removeEventListener matches addEventListener.
+    const onPlay = () => {
+      force();
+      start();
+    };
+    const onLoadedData = () => {
+      force();
+      if (!video.paused) start();
+    };
+    const onPauseOrEnded = () => {
+      force();
+    };
+
+    video.addEventListener("play", onPlay);
     video.addEventListener("seeked", force);
-    video.addEventListener("loadeddata", () => { force(); if (!video.paused) start(); });
-    video.addEventListener("pause", () => { force(); });
-    video.addEventListener("ended", () => { force(); });
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("pause", onPauseOrEnded);
+    video.addEventListener("ended", onPauseOrEnded);
     window.addEventListener("resize", force);
     force();
 
     return () => {
       cancelAnimationFrame(raf);
       running = false;
-      video.removeEventListener("play", start);
+      video.removeEventListener("play", onPlay);
       video.removeEventListener("seeked", force);
-      video.removeEventListener("loadeddata", start);
-      video.removeEventListener("pause", force);
-      video.removeEventListener("ended", force);
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("pause", onPauseOrEnded);
+      video.removeEventListener("ended", onPauseOrEnded);
       window.removeEventListener("resize", force);
     };
   }, [src, watermark, wm]);

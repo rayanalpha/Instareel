@@ -11,7 +11,7 @@ os.environ.setdefault("FERNET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
 os.environ.setdefault("SYNC_DATABASE_URL", "sqlite://")
 
-from app.utils.ffmpeg import build_command, build_filter, probe_sync  # noqa: E402
+from app.utils.ffmpeg import _parse_probe_json, build_command, build_filter  # noqa: E402
 from app.utils.instagram_helpers import device_settings_for, session_path_for  # noqa: E402
 from app.core.security import decrypt_secret, encrypt_secret  # noqa: E402
 
@@ -35,7 +35,8 @@ class TestDeviceSettings:
 
     def test_tracks_current_app_version(self):
         d = device_settings_for("x")
-        assert d["app_version"] >= "400.0.0"  # Instagram rejects outdated versions
+        # Numeric major comparison (lexicographic ">=" would accept "99.x" too).
+        assert int(str(d["app_version"]).split(".")[0]) >= 400  # Instagram rejects outdated versions
         assert d["model"] == "Pixel 8 Pro"
 
 
@@ -79,8 +80,27 @@ class TestProbeParsing:
             ],
             "format": {"duration": "12.5"},
         }).encode()
-        info = json.loads(raw)  # shape sanity
-        assert info["streams"][0]["width"] == 1920
+        info = _parse_probe_json(raw)
+        assert info["width"] == 1920
+        assert info["height"] == 1080
+        assert info["duration"] == 12.5
+        assert info["has_audio"] is True
+
+    def test_no_audio_flag(self):
+        raw = json.dumps({
+            "streams": [{"codec_type": "video", "width": 720, "height": 1280}],
+            "format": {"duration": "5"},
+        }).encode()
+        info = _parse_probe_json(raw)
+        assert info["has_audio"] is False
+        assert info["duration"] == 5.0
+
+    def test_empty_probe_defaults(self):
+        info = _parse_probe_json(b"{}")
+        assert info["duration"] == 0
+        assert info["width"] == 0
+        assert info["height"] == 0
+        assert info["has_audio"] is False
 
 
 class TestCrypto:
