@@ -29,6 +29,21 @@ def media_dirs() -> dict[str, str]:
     return dirs
 
 
+def effective_output_duration(probe_duration: float, trim_start: float | None, trim_end: float | None) -> float:
+    """Output length after trimming (pure — unit tested).
+
+    The trending track must be looped/cut to THIS, not the raw probe length,
+    or a trimmed video ends with a frozen frame under the ducked track.
+    """
+    total = probe_duration or 0.0
+    start = trim_start or 0.0
+    if trim_end and trim_end > start:
+        return max(0.0, trim_end - start)
+    if start:
+        return max(0.0, total - start)
+    return total
+
+
 def md5_of_file(path: str) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -137,7 +152,7 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
         trending_audio=audio_path,
         music_volume=audio_vol,
         duck_original=audio_duck,
-        loop_audio_to=info["duration"],
+        loop_audio_to=effective_output_duration(info["duration"], trim_start, trim_end),
     )
 
     def on_progress(pct: float, stage: str):
@@ -175,8 +190,16 @@ async def process_video(
     save_video,  # async callable persisting changes
     effect_filter: str = "",
     color_grade: str = "",
+    trending_audio: str | None = None,
+    music_volume: float = 0.4,
+    duck_original: bool = False,
 ) -> str:
-    """Async pipeline (web API use). Celery workers must use process_video_sync."""
+    """Async pipeline (web API use). Celery workers must use process_video_sync.
+
+    Trending audio is passed pre-resolved (path/volume/mode) by the caller —
+    this path has no DB session for a name lookup. Currently caller-less;
+    kept at parity so a future caller gets music instead of silence.
+    """
     from app.services import realtime
 
     video = await get_video(video_id)
@@ -198,6 +221,10 @@ async def process_video(
         color_grade=color_grade,
         watermark_path=watermark,
         has_audio=info["has_audio"],
+        trending_audio=trending_audio,
+        music_volume=music_volume,
+        duck_original=duck_original,
+        loop_audio_to=effective_output_duration(info["duration"], video.trim_start, video.trim_end),
     )
 
     async def on_progress(pct: float, stage: str):

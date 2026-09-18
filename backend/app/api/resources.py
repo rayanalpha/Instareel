@@ -3,6 +3,7 @@ import datetime as dt
 import os
 import uuid
 
+import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -307,15 +308,17 @@ async def upload_audio(
     raw_path = os.path.join(dirs["audio"], tmp_name)
     size = 0
     try:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > MAX_AUDIO_BYTES:
-                raise HTTPException(413, "Audio exceeds 50MB")
-            with open(raw_path, "ab") as f:
-                f.write(chunk)
+        # Single streaming handle (same pattern as video upload) — one
+        # open/write/close cycle instead of one per chunk.
+        async with aiofiles.open(raw_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_AUDIO_BYTES:
+                    raise HTTPException(413, "Audio exceeds 50MB")
+                await f.write(chunk)
     except HTTPException:
         if os.path.exists(raw_path):
             os.remove(raw_path)

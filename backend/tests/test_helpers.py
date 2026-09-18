@@ -603,6 +603,26 @@ class TestTrendingAudio:
         assert resolve_audio(s, None) is None
 
 
+class TestEffectiveDuration:
+    def test_trim_window(self):
+        from app.services.video_processor import effective_output_duration
+
+        assert effective_output_duration(20.0, 2.0, 8.0) == 6.0
+        assert effective_output_duration(20.0, None, 8.0) == 8.0
+
+    def test_start_only_and_plain(self):
+        from app.services.video_processor import effective_output_duration
+
+        assert effective_output_duration(20.0, 5.0, None) == 15.0
+        assert effective_output_duration(20.0, None, None) == 20.0
+
+    def test_nonsense_trims_clamped(self):
+        from app.services.video_processor import effective_output_duration
+
+        assert effective_output_duration(20.0, 30.0, None) == 0.0
+        assert effective_output_duration(20.0, 8.0, 5.0) == 12.0  # end<=start ignored
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

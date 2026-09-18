@@ -34,10 +34,21 @@ def _out(v: Video) -> VideoOut:
     )
 
 
-def _post_out(p: Post) -> PostOut:
+async def _audio_map(db: AsyncSession, video_ids: list[int]) -> dict[int, str | None]:
+    """Batch audio_track lookup for posts (one query, no N+1)."""
+    if not video_ids:
+        return {}
+    rows = (
+        await db.execute(select(Video.id, Video.audio_track).where(Video.id.in_(video_ids)))
+    ).all()
+    return {vid: audio for vid, audio in rows}
+
+
+def _post_out(p: Post, audio_track: str | None = None) -> PostOut:
     return PostOut(
         id=p.id, video_id=p.video_id, account_id=p.account_id, ig_media_id=p.ig_media_id,
         ig_permalink=p.ig_permalink, caption=p.caption, hashtags=p.hashtags, status=p.status.value,
+        audio_track=audio_track,
         scheduled_for=p.scheduled_for, posted_at=p.posted_at, views_24h=p.views_24h,
         views_7d=p.views_7d, likes_24h=p.likes_24h, engagement_rate=p.engagement_rate,
         fail_reason=p.fail_reason, retry_count=p.retry_count, created_at=p.created_at,
@@ -256,7 +267,8 @@ async def list_posts(
     rows = (await db.execute(q)).scalars().all()
     if account_id:
         rows = [p for p in rows if p.account_id == account_id]
-    return [_post_out(p) for p in rows]
+    audio = await _audio_map(db, [p.video_id for p in rows])
+    return [_post_out(p, audio.get(p.video_id)) for p in rows]
 
 
 @posts_router.get("/queue", response_model=list[PostOut])
@@ -271,7 +283,8 @@ async def post_queue(_: str = Depends(get_current_admin), db: AsyncSession = Dep
             .limit(100)
         )
     ).scalars().all()
-    return [_post_out(p) for p in rows]
+    audio = await _audio_map(db, [p.video_id for p in rows])
+    return [_post_out(p, audio.get(p.video_id)) for p in rows]
 
 
 @posts_router.get("/{post_id}", response_model=PostOut)
@@ -279,7 +292,8 @@ async def get_post(post_id: int, _: str = Depends(get_current_admin), db: AsyncS
     p = await db.get(Post, post_id)
     if not p:
         raise HTTPException(404, "Post not found")
-    return _post_out(p)
+    audio = await _audio_map(db, [p.video_id])
+    return _post_out(p, audio.get(p.video_id))
 
 
 @posts_router.post("/schedule", response_model=PostOut, status_code=201)
@@ -311,7 +325,7 @@ async def schedule_post(body: SchedulePostIn, _: str = Depends(get_current_admin
     db.add(post)
     await db.commit()
     await db.refresh(post)
-    return _post_out(post)
+    return _post_out(post, v.audio_track)
 
 
 @posts_router.post("/{post_id}/retry")

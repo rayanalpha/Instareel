@@ -37,6 +37,7 @@ class PostOut(BaseModel):
     ig_permalink: str | None
     caption: str
     hashtags: str
+    audio_track: str | None = None
     status: str
     scheduled_for: dt.datetime | None
     posted_at: dt.datetime | None

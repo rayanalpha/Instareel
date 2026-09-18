@@ -42,17 +42,19 @@ export default function PostsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs uppercase text-zinc-400">
-                  <th className="py-2 pr-4">Post</th><th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4 text-right">Views</th><th className="py-2 pr-4 text-right">Eng.</th>
-                  <th className="py-2 pr-4">Link</th><th className="py-2 text-right">Actions</th>
-                </tr>
+                  <tr className="text-left text-xs uppercase text-zinc-400">
+                    <th className="py-2 pr-4">Post</th><th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4">Audio</th>
+                    <th className="py-2 pr-4 text-right">Views</th><th className="py-2 pr-4 text-right">Eng.</th>
+                    <th className="py-2 pr-4">Link</th><th className="py-2 text-right">Actions</th>
+                  </tr>
               </thead>
               <tbody>
                 {posts.map((p) => (
                   <tr key={p.id} className="border-t border-zinc-100 dark:border-zinc-800">
                     <td className="py-2 pr-4">#{p.id} · acc #{p.account_id} · vid #{p.video_id}</td>
                     <td className="py-2 pr-4"><StatusBadge status={p.status} /></td>
+                    <td className="py-2 pr-4 text-zinc-500">{p.audio_track ?? "—"}</td>
                     <td className="py-2 pr-4 text-right">{fmt(p.views_7d ?? p.views_24h)}</td>
                     <td className="py-2 pr-4 text-right">{p.engagement_rate != null ? `${p.engagement_rate}%` : "—"}</td>
                     <td className="py-2 pr-4">{p.ig_permalink ? <a className="text-emerald-500 hover:underline" href={p.ig_permalink} target="_blank">Reel ↗</a> : "—"}</td>

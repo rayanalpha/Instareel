@@ -15,7 +15,7 @@ export interface Video {
 export interface Post {
   id: number; video_id: number; account_id: number; ig_media_id: string | null;
   ig_permalink: string | null; caption: string; hashtags: string; status: string;
-  scheduled_for: string | null; posted_at: string | null; views_24h: number | null;
+  scheduled_for: string | null; posted_at: string | null; audio_track: string | null; views_24h: number | null;
   views_7d: number | null; likes_24h: number | null; engagement_rate: number | null;
   fail_reason: string | null; retry_count: number; created_at: string;
 }
