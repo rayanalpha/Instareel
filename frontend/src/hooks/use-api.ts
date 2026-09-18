@@ -38,11 +38,18 @@ export function useOverview(days = 30) {
 export function useAccounts() {
   return useQuery({ queryKey: ["accounts"], queryFn: () => get("/accounts"), refetchInterval: 15000 });
 }
+
+/** Videos list: poll only while something is uploaded/processing —
+ * once everything settles, refetching stops (and so does the log noise). */
 export function useVideos(status = "") {
   return useQuery({
     queryKey: ["videos", status],
     queryFn: () => get(status ? `/videos?status=${status}` : "/videos"),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const rows = (query.state.data ?? []) as { status?: string }[];
+      const busy = rows.some((v) => v.status === "uploaded" || v.status === "processing");
+      return busy ? 5000 : false;
+    },
   });
 }
 export function usePosts(status = "") {
