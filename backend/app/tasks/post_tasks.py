@@ -77,7 +77,7 @@ def execute_post(self, post_id: int):
     from app.config import settings
     from app.core.security import decrypt_secret
     from app.database import SyncSessionLocal
-    from app.models import Account, AccountStatus, Post, PostStatus, Video, VideoStatus
+    from app.models import Account, AccountStatus, Post, PostStatus, Proxy, Video, VideoStatus
     from app.services.instagram_service import InstagramService
     from app.tasks import sync_helpers as sched
     from app.tasks.sync_helpers import log_event_sync, publish_sync
@@ -101,6 +101,7 @@ def execute_post(self, post_id: int):
             if not account:
                 return
             now = dt.datetime.now(dt.timezone.utc)
+            note = ""
             if ok:
                 account.last_post = now
                 account.posts_today += 1
@@ -110,9 +111,28 @@ def execute_post(self, post_id: int):
                 if kind == "challenge":
                     account.status = AccountStatus.challenge_required
                 elif kind == "throttled":
+                    from app.tasks.sync_helpers import throttle_cooldown_hours
+
+                    hours = throttle_cooldown_hours(post.retry_count if post else 0)
                     account.status = AccountStatus.cooldown
-                    account.cooldown_until = now + dt.timedelta(hours=24)
+                    account.cooldown_until = now + dt.timedelta(hours=hours)
+                    # Throttling is usually IP-based: move to a spare proxy so
+                    # the retry doesn't hammer the same flagged egress IP.
+                    own = s.get(Proxy, account.proxy_id) if account.proxy_id else None
+                    spare = sched.pick_spare_proxy(
+                        s,
+                        exclude_id=account.proxy_id,
+                        prefer_country=own.country if own else None,
+                    )
+                    if spare is not None and spare.id != account.proxy_id:
+                        account.proxy_id = spare.id
+                        note = f" — rotated proxy, cooldown {hours}h"
+                    else:
+                        note = f" — no spare proxy, cooldown {hours}h"
+            username = account.username
             s.commit()
+            if note:
+                log_event_sync("WARNING", "account", f"Account @{username} throttled{note}")
 
     try:
         with SyncSessionLocal() as s:

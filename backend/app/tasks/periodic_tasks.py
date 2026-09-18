@@ -107,6 +107,9 @@ def fetch_all_analytics():
 
 @celery.task(name="tasks.bio_tasks.check_bio_rotation")
 def check_bio_rotation():
+    import random
+    import time
+
     from sqlalchemy import select
 
     from app.config import settings
@@ -119,6 +122,8 @@ def check_bio_rotation():
     from app.utils.instagram_helpers import session_path_for
 
     try:
+        # Jitter the daily 6am firing so edits don't land at the same minute.
+        time.sleep(random.uniform(0, 120))
         now = dt.datetime.now(dt.timezone.utc)
         with SyncSessionLocal() as s:
             bios = s.execute(select(BioConfig).where(BioConfig.is_active.is_(True))).scalars().all()
