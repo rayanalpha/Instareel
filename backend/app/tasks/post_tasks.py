@@ -26,6 +26,7 @@ def check_and_post(self):
         with SyncSessionLocal() as s:
             rules = sched.due_rules(s)
             created = 0
+            used_video_ids: set[int] = set()
             for rule in rules:
                 if sched.already_scheduled(s, rule):
                     continue
@@ -37,7 +38,11 @@ def check_and_post(self):
                     # slot for the next tick instead of queueing a doomed post.
                     continue
                 video = sched.next_video(s, rule.preferred_effect)
-                if not video:
+                if not video or video.id in used_video_ids:
+                    continue
+                if sched.video_already_queued(s, video.id):
+                    # Queued by another rule (or the API) — one pending post
+                    # per video, so it can never upload twice.
                     continue
                 caption, _ = sched.pick_caption(s, rule.caption_template_id)
                 tags = sched.pick_hashtags(s)
@@ -53,6 +58,8 @@ def check_and_post(self):
                         scheduled_for=when,
                     )
                 )
+                s.flush()  # make the reservation visible to later rules in this tick
+                used_video_ids.add(video.id)
                 created += 1
             s.commit()
 
@@ -74,6 +81,8 @@ def check_and_post(self):
 
 @celery.task(name="tasks.post_tasks.execute_post", bind=True, max_retries=3)
 def execute_post(self, post_id: int):
+    from celery.exceptions import Retry
+
     from app.config import settings
     from app.core.security import decrypt_secret
     from app.database import SyncSessionLocal
@@ -135,23 +144,49 @@ def execute_post(self, post_id: int):
                 log_event_sync("WARNING", "account", f"Account @{username} throttled{note}")
 
     try:
+        # Single-flight claim: concurrent workers, beat redelivery and celery
+        # retries can never upload the same post twice.
+        with SyncSessionLocal() as s:
+            outcome = sched.claim_post(s, post_id)
+        if outcome == "missing":
+            return {"post_id": post_id, "status": "missing"}
+        if outcome == "busy":
+            return {"post_id": post_id, "status": "already-handled"}
+        publish_sync("post_status_update", {"post_id": post_id, "status": "posting"})
+
         with SyncSessionLocal() as s:
             post = s.get(Post, post_id)
-            if not post:
-                return {"post_id": post_id, "status": "missing"}
-            account = s.get(Account, post.account_id)
-            video = s.get(Video, post.video_id)
+            account = s.get(Account, post.account_id) if post else None
+            video = s.get(Video, post.video_id) if post else None
+            if post is None or account is None or video is None:
+                # Stale references (account/video deleted after scheduling) —
+                # fail the post explicitly instead of crashing on None.
+                missing = [n for n, o in (("post", post), ("account", account), ("video", video)) if o is None]
+                if post is not None:
+                    post.status = PostStatus.failed
+                    post.fail_reason = f"Stale reference: missing {', '.join(missing)}"
+                    s.commit()
+                publish_sync("post_status_update", {"post_id": post_id, "status": "failed"})
+                return {"post_id": post_id, "status": "failed", "error": f"missing {', '.join(missing)}"}
             caption, tags, retries = post.caption, post.hashtags, post.retry_count
+            video_id = video.id
             username, password = account.username, decrypt_secret(account.password_enc)
             video_path = video.processed_path or video.raw_path
             # Own proxy if healthy, else best spare (country-stable) — never
             # the raw name or a dead proxy.
-            proxy_url = sched.resolve_proxy_url(s, account) if account else None
+            proxy_url = sched.resolve_proxy_url(s, account)
 
-        set_status(PostStatus.posting)
-
-        # Anti-detection pre-post delay (blocking sleep â€” task is sync).
+        # Anti-detection pre-post delay (blocking sleep — task is sync).
         time.sleep(random.uniform(settings.IG_PRE_POST_DELAY_MIN, settings.IG_PRE_POST_DELAY_MAX))
+
+        # Re-verify after the sleep: the admin may have deleted the post or
+        # moved it out of 'posting' while we waited — never upload then.
+        with SyncSessionLocal() as s:
+            post = s.get(Post, post_id)
+            if post is None:
+                return {"post_id": post_id, "status": "missing"}
+            if post.status != PostStatus.posting:
+                return {"post_id": post_id, "status": "already-handled"}
 
         svc = InstagramService(proxy_url=proxy_url, session_path=session_path_for(username, settings.MEDIA_ROOT))
         full_caption = (caption + "\n" + tags).strip()
@@ -159,11 +194,22 @@ def execute_post(self, post_id: int):
 
         if error:
             kind = error.split(":")[0]
+            if kind in ("throttled", "login_required") and retries < 3:
+                # Park it back as scheduled (not failed) so the celery retry
+                # re-claims it cleanly instead of tripping over a failed row.
+                countdown = 2 ** retries * 60
+                set_status(
+                    PostStatus.scheduled,
+                    fail_reason=error[:2000],
+                    retry_count=retries + 1,
+                    scheduled_for=dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=countdown),
+                )
+                touch_account(False, error)
+                log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {error}")
+                raise self.retry(exc=RuntimeError(error), countdown=countdown)
             set_status(PostStatus.failed, fail_reason=error[:2000], retry_count=retries + 1)
             touch_account(False, error)
             log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {error}")
-            if kind in ("throttled", "login_required") and retries < 3:
-                raise self.retry(exc=RuntimeError(error), countdown=2 ** retries * 60)
             return {"post_id": post_id, "status": "failed", "error": error}
 
         set_status(
@@ -173,16 +219,17 @@ def execute_post(self, post_id: int):
             posted_at=dt.datetime.now(dt.timezone.utc),
         )
         touch_account(True)
-        # Archive the video so it is never posted twice.
+        # Archive the video by captured id so it is never posted twice, even
+        # if the post row itself was deleted in the meantime.
         with SyncSessionLocal() as s:
-            post = s.get(Post, post_id)
-            if post:
-                v = s.get(Video, post.video_id)
-                if v:
-                    v.status = VideoStatus.posted
-                s.commit()
+            v = s.get(Video, video_id)
+            if v is not None and v.status != VideoStatus.posted:
+                v.status = VideoStatus.posted
+            s.commit()
         log_event_sync("INFO", "post", f"Posted to @{username}", {"post_id": post_id, "url": permalink})
         return {"post_id": post_id, "status": "posted", "url": permalink}
+    except Retry:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.exception("execute_post %s failed", post_id)
         try:

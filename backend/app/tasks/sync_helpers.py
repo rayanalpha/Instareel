@@ -259,6 +259,47 @@ def next_video(session, effect: "str | None" = None):
     return session.execute(base.order_by(Video.created_at.asc()).limit(1)).scalars().first()
 
 
+def claim_post(session, post_id: int) -> str:
+    """Atomically claim a scheduled post for execution (single-flight).
+
+    One UPDATE ... WHERE status=scheduled so concurrent workers, beat
+    redelivery and celery retries can never upload the same post twice.
+    Returns 'claimed' | 'missing' | 'busy'. Commits on claim.
+    """
+    from sqlalchemy import update
+
+    from app.models import Post, PostStatus
+
+    res = session.execute(
+        update(Post)
+        .where(Post.id == post_id, Post.status == PostStatus.scheduled)
+        .values(status=PostStatus.posting)
+    )
+    session.commit()
+    if res.rowcount:
+        return "claimed"
+    post = session.get(Post, post_id)
+    return "missing" if post is None else "busy"
+
+
+def video_already_queued(session, video_id: int, window_min: int = 10) -> bool:
+    """True when the video already has a pending scheduled post in the window.
+
+    Prevents two rules in one tick (or API + beat) from queueing the same
+    video twice — the video is only freed after it posts or the post fails.
+    """
+    from app.models import Post, PostStatus
+
+    now = _now()
+    q = select(func.count(Post.id)).where(
+        Post.video_id == video_id,
+        Post.status == PostStatus.scheduled,
+        Post.scheduled_for >= now - dt.timedelta(minutes=window_min),
+        Post.scheduled_for <= now + dt.timedelta(minutes=window_min),
+    )
+    return (session.execute(q).scalar() or 0) > 0
+
+
 def already_scheduled(session, rule, window_min: int = 10) -> bool:
     from app.models import Post, PostStatus
 

@@ -266,6 +266,96 @@ class TestFeedRetry:
         assert calls == [5]
 
 
+class TestPostClaim:
+    """Single-flight claim + video reservation against a real (in-memory) DB."""
+
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    _seq = 0
+
+    def _seed_post(self, s, status="scheduled", when=None):
+        import datetime as dt
+
+        from app.models import Account, Post, PostStatus, Video
+
+        TestPostClaim._seq += 1
+        tag = TestPostClaim._seq
+        acc = Account(username=f"claimer{tag}", password_enc="x")
+        vid = Video(original_filename="a.mp4", raw_path="/tmp/a.mp4", md5_hash=f"h{tag}")
+        s.add_all([acc, vid])
+        s.flush()
+        post = Post(
+            video_id=vid.id,
+            account_id=acc.id,
+            status=PostStatus[status],
+            scheduled_for=when or dt.datetime.now(dt.timezone.utc),
+        )
+        s.add(post)
+        s.commit()
+        return acc.id, vid.id, post.id
+
+    def test_claim_then_busy_then_missing(self):
+        from app.models import Post, PostStatus
+        from app.tasks.sync_helpers import claim_post
+
+        s = self._session()
+        _, _, pid = self._seed_post(s)
+        assert claim_post(s, pid) == "claimed"
+        claimed = s.get(Post, pid)
+        assert claimed is not None and claimed.status == PostStatus.posting
+        # Beat redelivery / worker crash redelivery must not re-upload.
+        assert claim_post(s, pid) == "busy"
+        assert claim_post(s, 999999) == "missing"
+
+    def test_claim_refuses_non_scheduled(self):
+        from app.tasks.sync_helpers import claim_post
+
+        s = self._session()
+        import datetime as dt
+
+        for st in ("posting", "posted", "failed"):
+            _, _, pid = self._seed_post(s, status=st)
+            assert claim_post(s, pid) == "busy", st
+
+    def test_video_reservation_window(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import video_already_queued
+
+        s = self._session()
+        _, vid, _ = self._seed_post(s)
+        assert video_already_queued(s, vid) is True
+        assert video_already_queued(s, vid + 999) is False
+
+    def test_video_freed_after_post_or_far_schedule(self):
+        import datetime as dt
+
+        from app.models import Post, PostStatus
+        from app.tasks.sync_helpers import video_already_queued
+
+        s = self._session()
+        _, vid, pid = self._seed_post(s)
+        # Posted videos are archived by the executor — no longer queued.
+        row = s.get(Post, pid)
+        assert row is not None
+        row.status = PostStatus.posted
+        s.commit()
+        assert video_already_queued(s, vid) is False
+        # A post scheduled far outside the window doesn't block either.
+        far = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)
+        _, vid2, _ = self._seed_post(s, when=far)
+        assert video_already_queued(s, vid2) is False
+        assert video_already_queued(s, vid2, window_min=180) is True
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
