@@ -133,6 +133,82 @@ class TestDefaultEffects:
             assert "libx264" in " ".join(cmd), p["name"]
 
 
+class TestAccountHealthPolicy:
+    def _now(self):
+        import datetime as dt
+
+        return dt.datetime(2026, 9, 18, 12, 0, tzinfo=dt.timezone.utc)
+
+    def test_warmup_caps_fresh_account(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import effective_max_posts
+
+        now = self._now()
+        fresh = now - dt.timedelta(days=3)
+        assert effective_max_posts(fresh, 3, now) == 1
+        # Naive datetimes (SQLite) behave the same as aware ones.
+        assert effective_max_posts(fresh.replace(tzinfo=None), 3, now) == 1
+
+    def test_warmup_releases_after_7_days(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import effective_max_posts
+
+        now = self._now()
+        assert effective_max_posts(now - dt.timedelta(days=7), 3, now) == 3
+        assert effective_max_posts(now - dt.timedelta(days=30), 5, now) == 5
+
+    def test_warmup_never_raises_cap(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import effective_max_posts
+
+        now = self._now()
+        assert effective_max_posts(now, 1, now) == 1
+        assert effective_max_posts(None, 3, now) == 3
+
+    def test_throttle_backoff(self):
+        from app.tasks.sync_helpers import throttle_cooldown_hours
+
+        assert throttle_cooldown_hours(0) == 6
+        assert throttle_cooldown_hours(1) == 12
+        assert throttle_cooldown_hours(2) == 24
+        assert throttle_cooldown_hours(9) == 24
+
+    def test_spare_prefers_same_country_then_load_then_latency(self):
+        from app.tasks.sync_helpers import rank_spare_proxies
+
+        assert rank_spare_proxies([], "DE") is None
+        de_busy = {"proxy": "de-busy", "load": 5, "country": "DE", "latency": 50}
+        de_idle = {"proxy": "de-idle", "load": 0, "country": "de", "latency": 900}
+        us_idle = {"proxy": "us-idle", "load": 0, "country": "US", "latency": 20}
+        # Same country wins even with worse latency/load (no geo-hop).
+        assert rank_spare_proxies([us_idle, de_busy], "DE") == "de-busy"
+        # Within a country: lower load, then lower latency; None latency last.
+        de_noping = {"proxy": "de-noping", "load": 0, "country": "DE", "latency": None}
+        assert rank_spare_proxies([de_busy, de_idle, de_noping], "DE") == "de-idle"
+        assert rank_spare_proxies([us_idle, de_noping], "XX") == "us-idle"
+
+    def test_account_age_days_handles_naive(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import account_age_days
+
+        now = self._now()
+        assert account_age_days(now - dt.timedelta(hours=36), now) == 1.5
+        assert account_age_days(None, now) > 10**8
+
+    def test_missing_presets_top_up(self):
+        from app.services.default_effects import DEFAULT_EFFECT_PRESETS, missing_presets
+
+        assert missing_presets([]) == DEFAULT_EFFECT_PRESETS
+        names = [p["name"] for p in DEFAULT_EFFECT_PRESETS]
+        assert missing_presets(names) == []
+        partial = missing_presets(names[:5])
+        assert [p["name"] for p in partial] == names[5:]
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

@@ -30,8 +30,14 @@ def check_and_post(self):
                 if sched.already_scheduled(s, rule):
                     continue
                 account = sched.eligible_account(s, rule.account_id)
+                if not account:
+                    continue
+                if not sched.account_reachable(s, account):
+                    # Its proxy is down and no spare is healthy — leave the
+                    # slot for the next tick instead of queueing a doomed post.
+                    continue
                 video = sched.next_video(s, rule.preferred_effect)
-                if not account or not video:
+                if not video:
                     continue
                 caption, _ = sched.pick_caption(s, rule.caption_template_id)
                 tags = sched.pick_hashtags(s)
@@ -71,9 +77,9 @@ def execute_post(self, post_id: int):
     from app.config import settings
     from app.core.security import decrypt_secret
     from app.database import SyncSessionLocal
-    from app.models import Account, AccountStatus, Post, PostStatus, Proxy, Video, VideoStatus
+    from app.models import Account, AccountStatus, Post, PostStatus, Video, VideoStatus
     from app.services.instagram_service import InstagramService
-    from app.services.proxy_service import proxy_url_for
+    from app.tasks import sync_helpers as sched
     from app.tasks.sync_helpers import log_event_sync, publish_sync
     from app.utils.instagram_helpers import session_path_for
 
@@ -115,11 +121,12 @@ def execute_post(self, post_id: int):
                 return {"post_id": post_id, "status": "missing"}
             account = s.get(Account, post.account_id)
             video = s.get(Video, post.video_id)
-            proxy = s.get(Proxy, account.proxy_id) if account and account.proxy_id else None
             caption, tags, retries = post.caption, post.hashtags, post.retry_count
             username, password = account.username, decrypt_secret(account.password_enc)
             video_path = video.processed_path or video.raw_path
-            proxy_url = proxy_url_for(proxy) if proxy else None
+            # Own proxy if healthy, else best spare (country-stable) — never
+            # the raw name or a dead proxy.
+            proxy_url = sched.resolve_proxy_url(s, account) if account else None
 
         set_status(PostStatus.posting)
 

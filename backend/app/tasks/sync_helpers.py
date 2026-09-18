@@ -70,6 +70,135 @@ import datetime as dt
 
 from sqlalchemy import func, select
 
+# ---- Account/proxy health policy (pure helpers — unit tested) ----
+
+#: Fresh accounts stay in warm-up this long (see effective_max_posts).
+WARMUP_DAYS = 7
+#: Posting cap applied during warm-up regardless of the account setting.
+WARMUP_MAX_POSTS = 1
+#: Consecutive proxy failures before the proxy is auto-disabled.
+MAX_PROXY_FAILS = 5
+#: Cooldown given to accounts whose proxy was just auto-disabled.
+PROXY_FAIL_COOLDOWN_HOURS = 6
+#: Bio rotation skips accounts younger than this (fresh accounts changing bio = flag).
+BIO_MIN_AGE_DAYS = 14
+#: Analytics skips accounts younger than this (saves logins on day-0 accounts).
+ANALYTICS_MIN_AGE_DAYS = 3
+
+
+def account_age_days(created_at: "dt.datetime | None", now: "dt.datetime | None" = None) -> float:
+    """Age in days; tolerates naive datetimes (SQLite) by assuming UTC."""
+    now = now or _now()
+    if created_at is None:
+        return 10**9
+    ts = created_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    return (now - ts).total_seconds() / 86400
+
+
+def effective_max_posts(created_at: "dt.datetime | None", max_daily_posts: int, now: "dt.datetime | None" = None) -> int:
+    """Warm-up cap: accounts younger than WARMUP_DAYS post at most 1/day.
+
+    Handles naive datetimes (SQLite stores func.now() without tz) by
+    assuming UTC, so the same code works on SQLite and Postgres.
+    """
+    now = now or _now()
+    if created_at is None:
+        return max_daily_posts
+    ts = created_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    if (now - ts).days < WARMUP_DAYS:
+        return min(WARMUP_MAX_POSTS, max_daily_posts)
+    return max_daily_posts
+
+
+def throttle_cooldown_hours(retry_count: int) -> int:
+    """Exponential backoff for throttled accounts: 6h -> 12h -> 24h (capped)."""
+    return 6 * (2 ** max(0, min(retry_count, 2)))
+
+
+def rank_spare_proxies(candidates: list[dict], prefer_country: str = ""):
+    """Pick the best spare proxy (pure — unit tested).
+
+    Each candidate: {"proxy": obj, "load": int, "country": str, "latency": int|None}.
+    Prefers same-country (no sudden geo-hop), then fewest accounts, then lowest latency.
+    Returns the proxy object or None.
+    """
+    if not candidates:
+        return None
+    want = (prefer_country or "").upper()
+
+    def key(c: dict):
+        same = 0 if (want and (c.get("country") or "").upper() == want) else 1
+        lat = c.get("latency")
+        return (same, c.get("load", 0), lat if lat is not None else 10**9)
+
+    return sorted(candidates, key=key)[0]["proxy"]
+
+
+def pick_spare_proxy(session, exclude_id: "int | None" = None, prefer_country: "str | None" = None):
+    """Healthiest spare proxy from the DB (active + healthy, not exclude_id)."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.models import Account, Proxy
+
+    q = (
+        _select(Proxy, _func.count(Account.id))
+        .outerjoin(Account, Account.proxy_id == Proxy.id)
+        .where(Proxy.is_active.is_(True), Proxy.is_healthy.is_(True))
+        .group_by(Proxy.id)
+    )
+    if exclude_id:
+        q = q.where(Proxy.id != exclude_id)
+    rows = session.execute(q).all()
+    cands = [
+        {"proxy": p, "load": cnt or 0, "country": p.country or "", "latency": p.latency_ms}
+        for p, cnt in rows
+    ]
+    return rank_spare_proxies(cands, prefer_country or "")
+
+
+def resolve_proxy_url(session, account) -> "str | None":
+    """Connection URL for this post: own proxy if healthy, else best spare.
+
+    Returns None for direct connection (no proxy assigned) AND when no
+    healthy route exists — use account_reachable() to tell them apart.
+    """
+    from app.models import Proxy
+    from app.services.proxy_service import proxy_url_for
+
+    own = session.get(Proxy, account.proxy_id) if account.proxy_id else None
+    if own is None and not account.proxy_id:
+        return None
+    if own is not None and own.is_active and own.is_healthy:
+        return proxy_url_for(own)
+    spare = pick_spare_proxy(
+        session,
+        exclude_id=own.id if own else None,
+        prefer_country=own.country if own else None,
+    )
+    return proxy_url_for(spare) if spare is not None else None
+
+
+def account_reachable(session, account) -> bool:
+    """False only when the account needs a proxy but none healthy exists."""
+    if not account.proxy_id:
+        return True
+    from app.models import Proxy
+
+    own = session.get(Proxy, account.proxy_id)
+    if own is not None and own.is_active and own.is_healthy:
+        return True
+    spare = pick_spare_proxy(
+        session,
+        exclude_id=own.id if own else None,
+        prefer_country=own.country if own else None,
+    )
+    return spare is not None
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -94,9 +223,10 @@ def eligible_account(session, account_id: "int | None" = None):
     now = _now()
     if account_id:
         acc = session.get(Account, account_id)
-        if acc and acc.status == AccountStatus.active and acc.posts_today < acc.max_daily_posts:
+        if acc and acc.status == AccountStatus.active:
             if not acc.cooldown_until or acc.cooldown_until <= now:
-                return acc
+                if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
+                    return acc
         return None
     q = (
         select(Account)
@@ -108,7 +238,12 @@ def eligible_account(session, account_id: "int | None" = None):
         )
         .order_by(Account.last_post.asc().nulls_first())
     )
-    return session.execute(q).scalars().first()
+    # Warm-up cap is per-account age — filter in Python over the ordered set
+    # so a fresh account yields to older ones instead of blocking the slot.
+    for acc in session.execute(q).scalars().all():
+        if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
+            return acc
+    return None
 
 
 def next_video(session, effect: "str | None" = None):

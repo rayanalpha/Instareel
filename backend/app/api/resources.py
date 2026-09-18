@@ -206,10 +206,9 @@ async def list_effects(_: str = Depends(get_current_admin), db: AsyncSession = D
     # Top up any missing built-ins (covers both fresh DBs and servers seeded
     # with an older, smaller set) so the admin can just pick — no manual
     # FFmpeg entry needed. Never touches rows the admin added/edited.
-    from app.services.default_effects import DEFAULT_EFFECT_PRESETS
+    from app.services.default_effects import missing_presets
 
-    have = {e.name for e in rows}
-    missing = [p for p in DEFAULT_EFFECT_PRESETS if p["name"] not in have]
+    missing = missing_presets([e.name for e in rows])
     if missing:
         for preset in missing:
             db.add(EffectPreset(**preset))

@@ -14,6 +14,12 @@ Categories:
   shift) — handy for privacy masking and re-use edits.
 """
 
+def missing_presets(existing_names) -> list[dict[str, str]]:
+    """Built-ins absent from the DB (pure — unit tested)."""
+    have = set(existing_names)
+    return [p for p in DEFAULT_EFFECT_PRESETS if p["name"] not in have]
+
+
 DEFAULT_EFFECT_PRESETS: list[dict[str, str]] = [
     # ---------------- quality ----------------
     {

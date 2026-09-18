@@ -23,13 +23,35 @@ async def due_rules(session, at: dt.datetime | None = None) -> list[ScheduleRule
     return list((await session.execute(q)).scalars().all())
 
 
+def effective_max_posts(
+    created_at: dt.datetime | None, max_daily_posts: int, now: dt.datetime | None = None
+) -> int:
+    """Warm-up cap shared with the sync scheduler (see tasks.sync_helpers).
+
+    Accounts younger than 7 days post at most 1/day. Tolerates naive
+    datetimes (SQLite) by assuming UTC.
+    """
+    from app.tasks.sync_helpers import WARMUP_DAYS, WARMUP_MAX_POSTS
+
+    now = now or _now()
+    if created_at is None:
+        return max_daily_posts
+    ts = created_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    if (now - ts).days < WARMUP_DAYS:
+        return min(WARMUP_MAX_POSTS, max_daily_posts)
+    return max_daily_posts
+
+
 async def eligible_account(session, account_id: int | None = None) -> Account | None:
     now = _now()
     if account_id:
         acc = await session.get(Account, account_id)
-        if acc and acc.status == AccountStatus.active and acc.posts_today < acc.max_daily_posts:
+        if acc and acc.status == AccountStatus.active:
             if not acc.cooldown_until or acc.cooldown_until <= now:
-                return acc
+                if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
+                    return acc
         return None
     q = (
         select(Account)
@@ -41,7 +63,10 @@ async def eligible_account(session, account_id: int | None = None) -> Account | 
         )
         .order_by(Account.last_post.asc().nulls_first())
     )
-    return (await session.execute(q)).scalars().first()
+    for acc in (await session.execute(q)).scalars().all():
+        if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
+            return acc
+    return None
 
 
 async def next_video(session, effect: str | None = None) -> Video | None:
