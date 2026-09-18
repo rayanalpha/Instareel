@@ -45,8 +45,22 @@ async def eligible_account(session, account_id: int | None = None) -> Account | 
 
 
 async def next_video(session, effect: str | None = None) -> Video | None:
-    q = select(Video).where(Video.status == VideoStatus.processed).order_by(Video.created_at.asc())
-    video = (await session.execute(q)).scalars().first()
+    """Oldest processed video, preferring one that matches the rule's effect.
+
+    If the rule prefers an effect but no processed video carries it, fall
+    back to any processed video so a schedule slot is never silently wasted.
+    """
+    base = select(Video).where(Video.status == VideoStatus.processed)
+    if effect:
+        preferred = (
+            base.where(Video.effect_preset == effect)
+            .order_by(Video.created_at.asc())
+            .limit(1)
+        )
+        video = (await session.execute(preferred)).scalars().first()
+        if video:
+            return video
+    video = (await session.execute(base.order_by(Video.created_at.asc()).limit(1))).scalars().first()
     return video
 
 

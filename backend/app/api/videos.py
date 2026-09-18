@@ -6,7 +6,7 @@ import uuid
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,7 @@ from app.models import Post, PostStatus, Video, VideoStatus
 from app.schemas.video import PostOut, SchedulePostIn, VideoOut, VideoSettingsUpdate
 from app.services import realtime
 from app.services.log_service import log_event
-from app.services.video_processor import md5_of_file, media_dirs
+from app.services.video_processor import media_dirs
 
 router = APIRouter()
 

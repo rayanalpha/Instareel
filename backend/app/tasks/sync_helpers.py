@@ -112,10 +112,16 @@ def eligible_account(session, account_id: "int | None" = None):
 
 
 def next_video(session, effect: "str | None" = None):
+    """Oldest processed video, preferring the rule's effect; fallback to any."""
     from app.models import Video, VideoStatus
 
-    q = select(Video).where(Video.status == VideoStatus.processed).order_by(Video.created_at.asc())
-    return session.execute(q).scalars().first()
+    base = select(Video).where(Video.status == VideoStatus.processed)
+    if effect:
+        preferred = base.where(Video.effect_preset == effect).order_by(Video.created_at.asc()).limit(1)
+        video = session.execute(preferred).scalars().first()
+        if video:
+            return video
+    return session.execute(base.order_by(Video.created_at.asc()).limit(1)).scalars().first()
 
 
 def already_scheduled(session, rule, window_min: int = 10) -> bool:

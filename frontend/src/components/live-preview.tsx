@@ -5,7 +5,8 @@ import { EFFECT_CSS, drawWatermark, useWatermarkImage } from "@/components/video
 /**
  * Live preview: HTML5 video + canvas watermark overlay + CSS effect approximation.
  * Canvas sits exactly on top of the video and redraws on play/seek/resize so
- * the watermark stays static over the moving frame.
+ * the watermark stays static over the moving frame. The rAF loop only runs
+ * while it can actually draw (playing, or paused with a pending redraw).
  */
 export function LivePreview({
   src,
@@ -28,6 +29,7 @@ export function LivePreview({
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
     let raf = 0;
+    let running = false;
     let lastDrawn = -1;
 
     const draw = () => {
@@ -37,31 +39,58 @@ export function LivePreview({
         canvas.width = w;
         canvas.height = h;
       }
-      // Redraw when playing (time changes) or after a state change.
-      if (watermark && wm && (!video.paused || video.currentTime !== lastDrawn)) {
+      if (watermark && wm) {
         drawWatermark(canvas, wm);
         lastDrawn = video.currentTime;
-      } else if (!watermark) {
-        const ctx = canvas.getContext("2d");
-        ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        lastDrawn = video.currentTime;
       }
-      raf = requestAnimationFrame(draw);
+      // Keep looping only while the frame is actually moving; idle → stop.
+      if (!video.paused && !video.ended) {
+        raf = requestAnimationFrame(draw);
+      } else {
+        running = false;
+      }
     };
-    raf = requestAnimationFrame(draw);
 
-    const force = () => {
-      lastDrawn = -1;
+    const start = () => {
+      if (!running) {
+        running = true;
+        raf = requestAnimationFrame(draw);
+      }
     };
-    video.addEventListener("play", force);
+    const force = () => {
+      // One immediate redraw (watermark state, resize, seek) without looping.
+      if (watermark && wm) {
+        const w = video.clientWidth;
+        const h = video.clientHeight;
+        if (w > 0 && h > 0) {
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
+          drawWatermark(canvas, wm);
+          lastDrawn = video.currentTime;
+        }
+      } else {
+        canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+
+    video.addEventListener("play", () => { force(); start(); });
     video.addEventListener("seeked", force);
-    video.addEventListener("loadeddata", force);
+    video.addEventListener("loadeddata", () => { force(); if (!video.paused) start(); });
+    video.addEventListener("pause", () => { force(); });
+    video.addEventListener("ended", () => { force(); });
     window.addEventListener("resize", force);
+    force();
+
     return () => {
       cancelAnimationFrame(raf);
-      video.removeEventListener("play", force);
+      running = false;
+      video.removeEventListener("play", start);
       video.removeEventListener("seeked", force);
-      video.removeEventListener("loadeddata", force);
+      video.removeEventListener("loadeddata", start);
+      video.removeEventListener("pause", force);
+      video.removeEventListener("ended", force);
       window.removeEventListener("resize", force);
     };
   }, [src, watermark, wm]);

@@ -8,6 +8,8 @@ media/thumbnails/*
 !media/.gitkeep
 !media/watermarks/.gitkeep
 backend/sessions/
+media/sessions/
+backend/media/
 node_modules/
 frontend/.next/
 frontend/out/
