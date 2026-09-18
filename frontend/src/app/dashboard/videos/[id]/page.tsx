@@ -4,12 +4,12 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardTitle, Field, Spinner, StatusBadge } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
-import { useApiMutation, useEffects } from "@/hooks/use-api";
+import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
 
 interface Detail {
   id: number; original_filename: string; duration: number | null; status: string;
-  effect_preset: string | null; add_watermark: boolean; trim_start: number | null;
-  trim_end: number | null; failed_reason: string | null;
+  effect_preset: string | null; audio_track: string | null; add_watermark: boolean;
+  trim_start: number | null; trim_end: number | null; failed_reason: string | null;
 }
 
 // Terminal states: nothing left to wait for — stop polling.
@@ -21,8 +21,9 @@ export default function VideoDetailPage() {
   const [progress, setProgress] = useState<{ percentage: number; stage: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
-  const [form, setForm] = useState({ effect_preset: "", trim_start: "", trim_end: "", add_watermark: true });
+  const [form, setForm] = useState({ effect_preset: "", audio_track: "", trim_start: "", trim_end: "", add_watermark: true });
   const { data: effects } = useEffects();
+  const { data: audios } = useAudios();
   const save = useApiMutation("put", [["videos"]]);
   const process = useApiMutation("post", [["videos"]]);
 
@@ -31,6 +32,7 @@ export default function VideoDetailPage() {
     setVideo(data);
     setForm({
       effect_preset: data.effect_preset ?? "",
+      audio_track: data.audio_track ?? "",
       trim_start: data.trim_start?.toString() ?? "",
       trim_end: data.trim_end?.toString() ?? "",
       add_watermark: data.add_watermark,
@@ -148,6 +150,14 @@ export default function VideoDetailPage() {
               ))}
             </select>
           </Field>
+          <Field label="Trending audio">
+            <select className="input" value={form.audio_track} onChange={(e) => setForm({ ...form, audio_track: e.target.value })}>
+              <option value="">Auto (best least-used track)</option>
+              {((audios ?? []) as { name: string; description: string }[]).map((a) => (
+                <option key={a.name} value={a.name}>{a.name} — {a.description.slice(0, 60)}</option>
+              ))}
+            </select>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Trim start (s)">
               <input className="input" type="number" min={0} step={0.5} value={form.trim_start} onChange={(e) => setForm({ ...form, trim_start: e.target.value })} />
@@ -169,6 +179,7 @@ export default function VideoDetailPage() {
                   url: `/videos/${id}/settings`,
                   body: {
                     effect_preset: form.effect_preset || null,
+                    audio_track: form.audio_track || null,
                     trim_start: form.trim_start ? Number(form.trim_start) : null,
                     trim_end: form.trim_end ? Number(form.trim_end) : null,
                     add_watermark: form.add_watermark,

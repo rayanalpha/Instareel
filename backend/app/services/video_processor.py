@@ -22,6 +22,7 @@ def media_dirs() -> dict[str, str]:
         "processed": os.path.join(root, "processed"),
         "thumbnails": os.path.join(root, "thumbnails"),
         "watermarks": os.path.join(root, "watermarks"),
+        "audio": os.path.join(root, "audio"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
@@ -97,6 +98,7 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
                 effect_preset = ""
         custom_filters = video.custom_filters
         add_watermark = video.add_watermark
+        audio_choice = video.audio_track
         video.status = VideoStatus.processing
         s.commit()
 
@@ -106,6 +108,20 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
     if info["duration"] < 3:
         raise ValueError(f"Video too short ({info['duration']:.1f}s < 3s)")
     set_progress_sync(video_id, 8, "validated")
+
+    # Resolve the chosen trending track (name -> file/volume/mode). Unknown
+    # names or missing files quietly mean "no music" — never fail the encode.
+    from app.tasks.sync_helpers import resolve_audio
+
+    audio_path: str | None = None
+    audio_vol, audio_duck = 0.4, False
+    if audio_choice:
+        with SyncSessionLocal() as s:
+            track = resolve_audio(s, audio_choice)
+        if track is not None:
+            audio_path, audio_vol, audio_duck = track.file_path, track.music_volume, track.duck_original
+        else:
+            log.warning("Audio track '%s' unresolvable at encode time — proceeding silent", audio_choice)
 
     out_name = f"{uuid.uuid4().hex}.mp4"
     dst = os.path.join(dirs["processed"], out_name)
@@ -118,6 +134,10 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
         color_grade=color_grade,
         watermark_path=watermark,
         has_audio=info["has_audio"],
+        trending_audio=audio_path,
+        music_volume=audio_vol,
+        duck_original=audio_duck,
+        loop_audio_to=info["duration"],
     )
 
     def on_progress(pct: float, stage: str):

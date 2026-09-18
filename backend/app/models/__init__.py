@@ -1,5 +1,6 @@
 from app.models.account import Account, AccountStatus, Proxy, ProxyProtocol
 from app.models.content import (
+    AudioTrack,
     BioConfig,
     CaptionTemplate,
     EffectPreset,
@@ -25,6 +26,7 @@ __all__ = [
     "HashtagSet",
     "BioConfig",
     "EffectPreset",
+    "AudioTrack",
     "SystemLog",
     "LogLevel",
     "Setting",

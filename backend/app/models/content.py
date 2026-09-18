@@ -69,6 +69,31 @@ class EffectPreset(Base, TimestampMixin):
     avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class AudioTrack(Base, TimestampMixin):
+    """Trending/named audio mixed into processed videos (FFmpeg, pre-upload).
+
+    The track's sound is baked into the file's audio stream — this is what
+    viewers hear (and what drives retention). Note: this does NOT attach an
+    official IG licensed-track attribution; that surface only exists in the
+    official app. Selection is data-driven: least-used + best-engagement
+    weighting in tasks.sync_helpers.pick_audio.
+    """
+
+    __tablename__ = "audio_tracks"
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    duration: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Playback level of the music (0.0-2.0). Original audio stays at full
+    # volume unless duck_original mutes it in favor of the track.
+    music_volume: Mapped[float] = mapped_column(Float, default=0.4)
+    duck_original: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class LogLevel(str, enum.Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"

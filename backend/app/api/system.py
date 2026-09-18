@@ -15,7 +15,7 @@ from app.api.deps import get_current_admin, get_db
 from app.config import settings
 from app.core.security import decode_token
 from app.database import SessionLocal
-from app.models import LogLevel, Post, PostStatus, Setting, SystemLog
+from app.models import LogLevel, Post, PostStatus, Setting, SystemLog, Video
 from app.schemas.content import LogOut, SettingOut
 from app.services import analytics_service, log_service
 
@@ -65,6 +65,33 @@ async def effects_breakdown(_: str = Depends(get_current_admin), db: AsyncSessio
     return out
 
 
+@analytics_router.get("/audio")
+async def audio_breakdown(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Per-track performance: which trending sound actually drives explore.
+
+    Attribution rides on Video.audio_track (set at processing time), mirroring
+    the effects breakdown — no extra columns needed.
+    """
+    from app.models import AudioTrack, Video
+
+    tracks = (await db.execute(select(AudioTrack))).scalars().all()
+    out = []
+    for track in tracks:
+        row = (
+            await db.execute(
+                select(func.count(Post.id), func.avg(Post.engagement_rate), func.coalesce(func.sum(Post.views_7d), 0))
+                .join(Video, Video.id == Post.video_id)
+                .where(Video.audio_track == track.name, Post.status == PostStatus.posted)
+            )
+        ).one()
+        out.append({
+            "id": track.id, "name": track.name, "posts": row[0],
+            "avg_engagement": round(float(row[1] or 0), 2), "views": int(row[2] or 0),
+            "use_count": track.use_count, "is_active": track.is_active,
+        })
+    return out
+
+
 @analytics_router.get("/captions")
 async def captions_breakdown(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     from app.models import CaptionTemplate
@@ -80,12 +107,12 @@ async def time_slots(_: str = Depends(get_current_admin), db: AsyncSession = Dep
 
 @analytics_router.get("/export")
 async def export_csv(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(select(Post).where(Post.status == PostStatus.posted).order_by(desc(Post.posted_at)).limit(2000))).scalars().all()
+    rows = (await db.execute(select(Post, Video).join(Video, Video.id == Post.video_id).where(Post.status == PostStatus.posted).order_by(desc(Post.posted_at)).limit(2000))).all()
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["id", "account_id", "posted_at", "views_7d", "likes_7d", "comments_7d", "engagement_rate", "url"])
-    for p in rows:
-        w.writerow([p.id, p.account_id, p.posted_at, p.views_7d, p.likes_7d, p.comments_7d, p.engagement_rate, p.ig_permalink])
+    w.writerow(["id", "account_id", "posted_at", "views_7d", "likes_7d", "comments_7d", "engagement_rate", "audio_track", "url"])
+    for p, v in rows:
+        w.writerow([p.id, p.account_id, p.posted_at, p.views_7d, p.likes_7d, p.comments_7d, p.engagement_rate, v.audio_track, p.ig_permalink])
     return PlainTextResponse(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=analytics.csv"})
 
 

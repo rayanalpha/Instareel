@@ -43,7 +43,7 @@ app.include_router(ws_mount)
 @app.on_event("startup")
 async def startup():
     os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
-    for sub in ("raw", "processed", "thumbnails", "watermarks", "sessions"):
+    for sub in ("raw", "processed", "thumbnails", "watermarks", "sessions", "audio"):
         os.makedirs(os.path.join(settings.MEDIA_ROOT, sub), exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

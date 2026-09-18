@@ -353,6 +353,43 @@ def already_scheduled(session, rule, window_min: int = 10) -> bool:
     return (session.execute(q).scalar() or 0) > 0
 
 
+def resolve_audio(session, name: "str | None"):
+    """Active AudioTrack (by name) with an existing file — else None, never raises."""
+    import os
+
+    from app.models import AudioTrack
+
+    clean = (name or "").strip()
+    if not clean:
+        return None
+    t = (
+        session.execute(
+            select(AudioTrack).where(
+                AudioTrack.name == clean, AudioTrack.is_active.is_(True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if t is not None and t.file_path and os.path.exists(t.file_path):
+        return t
+    return None
+
+
+def pick_audio(session):
+    """Weighted-random active track whose file exists (least-used favored)."""
+    import os
+
+    from app.models import AudioTrack
+
+    rows = session.execute(select(AudioTrack).where(AudioTrack.is_active.is_(True))).scalars().all()
+    rows = [r for r in rows if r.file_path and os.path.exists(r.file_path)]
+    if not rows:
+        return None
+    weights = [1.0 / (1.0 + (r.use_count or 0)) for r in rows]
+    return random.choices(rows, weights=weights, k=1)[0]
+
+
 def pick_caption(session, template_id: "int | None") -> "tuple[str, int | None]":
     from app.models import CaptionTemplate
 

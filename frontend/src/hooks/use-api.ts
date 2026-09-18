@@ -80,6 +80,12 @@ export function useProxies() {
 export function useEffects() {
   return useQuery({ queryKey: ["effects"], queryFn: () => get("/effects") });
 }
+export function useAudios() {
+  return useQuery({ queryKey: ["audio"], queryFn: () => get("/audio") });
+}
+export function useAudioStats() {
+  return useQuery({ queryKey: ["audio-stats"], queryFn: () => get("/analytics/audio") });
+}
 export function useLogs() {
   return useQuery({ queryKey: ["logs"], queryFn: () => get("/logs?limit=200"), refetchInterval: 8000 });
 }

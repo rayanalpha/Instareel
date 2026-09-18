@@ -27,7 +27,8 @@ UPLOAD_CHUNK = 4 * 1024 * 1024
 def _out(v: Video) -> VideoOut:
     return VideoOut(
         id=v.id, original_filename=v.original_filename, duration=v.duration, file_size=v.file_size,
-        status=v.status.value, effect_preset=v.effect_preset, add_watermark=v.add_watermark,
+        status=v.status.value, effect_preset=v.effect_preset, audio_track=v.audio_track,
+        add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
         processed_at=v.processed_at, thumbnail_path=v.thumbnail_path, created_at=v.created_at,
     )
@@ -202,7 +203,7 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
-    for field in ("effect_preset", "custom_filters", "trim_start", "trim_end", "add_watermark"):
+    for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end", "add_watermark"):
         val = getattr(body, field)
         if val is not None:
             setattr(v, field, val)

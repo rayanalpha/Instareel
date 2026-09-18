@@ -1,21 +1,35 @@
-"""Bios, proxies, effects."""
+"""Bios, proxies, effects, audio tracks."""
 import datetime as dt
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin, get_db
 from app.core.security import decrypt_secret, encrypt_secret
 from app.database import SessionLocal
-from app.models import Account, BioConfig, EffectPreset, Proxy, ProxyProtocol
+from app.models import Account, AudioTrack, BioConfig, EffectPreset, Proxy, ProxyProtocol
 from app.schemas.account import ProxyCreate, ProxyOut, ProxyUpdate
-from app.schemas.content import BioIn, BioOut, EffectIn, EffectOut
+from app.schemas.content import AudioIn, AudioOut, BioIn, BioOut, EffectIn, EffectOut
 from app.services.log_service import log_event
 
 bio_router = APIRouter()
 proxy_router = APIRouter()
 effect_router = APIRouter()
+audio_router = APIRouter()
+
+AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
+MAX_AUDIO_BYTES = 50 * 1024 * 1024
+
+
+def _audio_out(t: AudioTrack) -> AudioOut:
+    return AudioOut(
+        id=t.id, name=t.name, description=t.description, music_volume=t.music_volume,
+        duck_original=t.duck_original, is_active=t.is_active, file_path=t.file_path,
+        duration=t.duration, use_count=t.use_count, avg_engagement=t.avg_engagement,
+    )
 
 
 # ---- Bios ----
@@ -248,4 +262,125 @@ async def delete_effect(eid: int, _: str = Depends(get_current_admin), db: Async
         raise HTTPException(404, "Effect not found")
     await db.delete(e)
     await db.commit()
+    return None
+
+
+# ---- Audio tracks (trending sounds mixed in at processing time) ----
+
+@audio_router.get("", response_model=list[AudioOut])
+async def list_audio(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(AudioTrack).order_by(AudioTrack.name))).scalars().all()
+    return [_audio_out(t) for t in rows]
+
+
+@audio_router.post("/upload", response_model=AudioOut, status_code=201)
+async def upload_audio(
+    file: UploadFile = File(...),
+    name: str = "",
+    description: str = "",
+    music_volume: float = 0.4,
+    duck_original: bool = False,
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a trending sound (MP3/WAV/M4A/…). Validated with ffprobe, then
+    eligible for automatic weighted selection at processing time."""
+    import asyncio
+
+    from app.config import settings
+    from app.services.video_processor import media_dirs
+    from app.utils import ffmpeg as ff
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in AUDIO_EXT:
+        raise HTTPException(400, f"Unsupported audio type {ext}. Allowed: {sorted(AUDIO_EXT)}")
+    if not (0.0 <= music_volume <= 2.0):
+        raise HTTPException(400, "music_volume must be between 0.0 and 2.0")
+    track_name = (name or os.path.splitext(file.filename or "track")[0]).strip()[:128]
+    if not track_name:
+        raise HTTPException(400, "Track name is required")
+    exists = (await db.execute(select(AudioTrack).where(AudioTrack.name == track_name))).scalar_one_or_none()
+    if exists:
+        raise HTTPException(409, "Audio track already exists")
+    dirs = media_dirs()
+    tmp_name = f"{uuid.uuid4().hex}{ext}"
+    raw_path = os.path.join(dirs["audio"], tmp_name)
+    size = 0
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_AUDIO_BYTES:
+                raise HTTPException(413, "Audio exceeds 50MB")
+            with open(raw_path, "ab") as f:
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+        raise
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
+    if size == 0:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+        raise HTTPException(400, "Empty file")
+    try:
+        probe = await asyncio.wait_for(asyncio.to_thread(ff.probe_sync, raw_path), timeout=60)
+    except Exception:
+        os.remove(raw_path)
+        raise HTTPException(422, "File is not valid audio (ffprobe validation failed)")
+    duration = probe.get("duration") or 0
+    if duration < 1:
+        os.remove(raw_path)
+        raise HTTPException(422, "Audio is too short (< 1s)")
+    t = AudioTrack(
+        name=track_name, description=description[:2000], file_path=raw_path,
+        duration=duration, music_volume=music_volume, duck_original=duck_original,
+    )
+    db.add(t)
+    await db.commit()
+    await db.refresh(t)
+    await log_event("INFO", "audio", f"Audio track '{track_name}' uploaded ({duration:.1f}s)")
+    return _audio_out(t)
+
+
+@audio_router.put("/{tid}", response_model=AudioOut)
+async def update_audio(tid: int, body: AudioIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    t = await db.get(AudioTrack, tid)
+    if not t:
+        raise HTTPException(404, "Audio track not found")
+    clash = (await db.execute(
+        select(AudioTrack).where(AudioTrack.name == body.name, AudioTrack.id != tid)
+    )).scalar_one_or_none()
+    if clash:
+        raise HTTPException(409, "Another track already uses that name")
+    t.name = body.name
+    t.description = body.description
+    t.music_volume = body.music_volume
+    t.duck_original = body.duck_original
+    t.is_active = body.is_active
+    await db.commit()
+    await db.refresh(t)
+    return _audio_out(t)
+
+
+@audio_router.delete("/{tid}", status_code=204)
+async def delete_audio(tid: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    t = await db.get(AudioTrack, tid)
+    if not t:
+        raise HTTPException(404, "Audio track not found")
+    path = t.file_path
+    await db.delete(t)
+    await db.commit()
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+    await log_event("INFO", "audio", f"Audio track '{t.name}' deleted")
     return None

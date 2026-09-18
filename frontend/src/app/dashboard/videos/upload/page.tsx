@@ -5,18 +5,20 @@ import { api } from "@/lib/api";
 import { UploadCloud } from "lucide-react";
 import { Card, Field } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
-import { useEffects } from "@/hooks/use-api";
+import { useAudios, useEffects } from "@/hooks/use-api";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [effect, setEffect] = useState("");
+  const [audio, setAudio] = useState("");
   const [watermark, setWatermark] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [drag, setDrag] = useState(false);
   const router = useRouter();
   const { data: effects } = useEffects();
+  const { data: audios } = useAudios();
 
   useEffect(() => {
     if (!file) {
@@ -45,6 +47,7 @@ export default function UploadPage() {
           `/videos/${data.id}/settings`,
           {
             effect_preset: effect || null,
+            audio_track: audio || null,
             add_watermark: watermark,
           },
         );
@@ -88,6 +91,14 @@ export default function UploadPage() {
                 <option value="">Auto (random active preset)</option>
                 {((effects ?? []) as { name: string; description: string }[]).map((e) => (
                   <option key={e.name} value={e.name}>{e.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Trending audio (mixed in at processing)">
+              <select className="input" value={audio} onChange={(e) => setAudio(e.target.value)}>
+                <option value="">Auto (best least-used track)</option>
+                {((audios ?? []) as { name: string; description: string }[]).map((a) => (
+                  <option key={a.name} value={a.name}>{a.name}</option>
                 ))}
               </select>
             </Field>

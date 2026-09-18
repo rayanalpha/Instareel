@@ -513,6 +513,96 @@ class TestSessionCookieHelpers:
         assert extract_sessionid({}) is None
 
 
+class TestTrendingAudio:
+    def _mp3(self, tmp_path, name="trend.mp3"):
+        p = tmp_path / name
+        p.write_bytes(b"ID3" + b"\x00" * 1024)
+        return str(p)
+
+    def test_no_trending_keeps_legacy_command(self):
+        cmd = build_command("in.mp4", "out.mp4")
+        joined = " ".join(cmd)
+        assert "amix" not in joined and "-map" in cmd and "0:a?" in cmd
+
+    def test_mix_mode_loops_and_mixes(self, tmp_path):
+        music = self._mp3(tmp_path)
+        cmd = build_command("in.mp4", "out.mp4", trending_audio=music, music_volume=0.5, loop_audio_to=12.5)
+        joined = " ".join(cmd)
+        assert "-stream_loop" in cmd and "12.5" in cmd
+        assert "amix=inputs=2:duration=first" in joined
+        assert "[aout]" in joined and "volume=0.5" in joined
+
+    def test_duck_mode_replaces_audio(self, tmp_path):
+        music = self._mp3(tmp_path)
+        cmd = build_command("in.mp4", "out.mp4", trending_audio=music, duck_original=True)
+        joined = " ".join(cmd)
+        assert "amix" not in joined and "volume=0.4,loudnorm" in joined
+
+    def test_silent_video_gets_track_as_audio(self, tmp_path):
+        music = self._mp3(tmp_path)
+        cmd = build_command("in.mp4", "out.mp4", has_audio=False, trending_audio=music, loop_audio_to=8)
+        joined = " ".join(cmd)
+        assert "anullsrc" not in joined and "amix" not in joined
+
+    def test_missing_file_silently_ignored(self):
+        cmd = build_command("in.mp4", "out.mp4", trending_audio="/nope/missing.mp3")
+        joined = " ".join(cmd)
+        assert "amix" not in joined and "0:a?" in cmd
+
+    def _audio_session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def _seed_tracks(self, s, tmp_path):
+        from app.models import AudioTrack
+
+        live = AudioTrack(name="hit", file_path=self._mp3(tmp_path, "hit.mp3"), use_count=5)
+        fresh = AudioTrack(name="new", file_path=self._mp3(tmp_path, "new.mp3"), use_count=0)
+        off = AudioTrack(name="off", file_path=self._mp3(tmp_path, "off.mp3"), is_active=False)
+        ghost = AudioTrack(name="ghost", file_path="/nope/gone.mp3")
+        s.add_all([live, fresh, off, ghost])
+        s.commit()
+
+    def test_pick_prefers_usable_and_least_used(self, tmp_path):
+        from app.tasks.sync_helpers import pick_audio
+
+        s = self._audio_session()
+        self._seed_tracks(s, tmp_path)
+        seen = {pick_audio(s).name for _ in range(20)}
+        # Only usable tracks ever surface; ghost/off never picked.
+        assert seen <= {"hit", "new"}
+        # Least-used dominates the weighting.
+        assert sum(1 for _ in range(40) if pick_audio(s).name == "new") > 20
+
+    def test_pick_empty_when_nothing_usable(self, tmp_path):
+        from app.models import AudioTrack
+        from app.tasks.sync_helpers import pick_audio
+
+        s = self._audio_session()
+        s.add(AudioTrack(name="gone", file_path="/nope/gone.mp3"))
+        s.commit()
+        assert pick_audio(s) is None
+
+    def test_resolve_guards(self, tmp_path):
+        from app.tasks.sync_helpers import resolve_audio
+
+        s = self._audio_session()
+        self._seed_tracks(s, tmp_path)
+        hit = resolve_audio(s, "hit")
+        assert hit is not None and hit.file_path.endswith("hit.mp3")
+        assert resolve_audio(s, "off") is None
+        assert resolve_audio(s, "ghost") is None
+        assert resolve_audio(s, "nope") is None
+        assert resolve_audio(s, "") is None
+        assert resolve_audio(s, None) is None
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

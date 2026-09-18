@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3, CalendarClock, Captions, Clapperboard, FileText, Home, Instagram,
-  LogOut, Menu, Moon, Settings, SlidersHorizontal, Sun, Users, History,
+  LogOut, Menu, Moon, Music, Settings, SlidersHorizontal, Sun, Users, History,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ const NAV = [
   { href: "/dashboard/bios", label: "Bios", icon: FileText },
   { href: "/dashboard/proxies", label: "Proxies", icon: Users },
   { href: "/dashboard/effects", label: "Effects", icon: SlidersHorizontal },
+  { href: "/dashboard/audio", label: "Audio", icon: Music },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/logs", label: "Logs", icon: FileText },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },

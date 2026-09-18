@@ -10,6 +10,7 @@ class VideoOut(BaseModel):
     file_size: int | None
     status: str
     effect_preset: str | None
+    audio_track: str | None
     add_watermark: bool
     trim_start: float | None
     trim_end: float | None
@@ -21,6 +22,7 @@ class VideoOut(BaseModel):
 
 class VideoSettingsUpdate(BaseModel):
     effect_preset: str | None = None
+    audio_track: str | None = None
     custom_filters: str | None = None
     trim_start: float | None = None
     trim_end: float | None = None

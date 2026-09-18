@@ -42,6 +42,8 @@ class Video(Base, TimestampMixin):
     upload_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     effect_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Name of the AudioTrack mixed in at processing time (resolved like effect_preset).
+    audio_track: Mapped[str | None] = mapped_column(String(128), nullable=True)
     custom_filters: Mapped[str | None] = mapped_column(Text, nullable=True)
     trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)

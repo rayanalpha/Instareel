@@ -69,6 +69,22 @@ class EffectOut(EffectIn):
     avg_engagement: float | None
 
 
+class AudioIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str = ""
+    music_volume: float = Field(default=0.4, ge=0.0, le=2.0)
+    duck_original: bool = False
+    is_active: bool = True
+
+
+class AudioOut(AudioIn):
+    id: int
+    file_path: str
+    duration: float | None
+    use_count: int
+    avg_engagement: float | None
+
+
 class SettingOut(BaseModel):
     key: str
     value: str

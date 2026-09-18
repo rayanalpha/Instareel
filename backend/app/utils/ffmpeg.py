@@ -98,12 +98,28 @@ def build_command(
     color_grade: str = "",
     watermark_path: str | None = None,
     has_audio: bool = True,
+    trending_audio: str | None = None,
+    music_volume: float = 0.4,
+    duck_original: bool = False,
+    loop_audio_to: float | None = None,
 ) -> list[str]:
+    """Build the ffmpeg command. Trending-audio modes (music file must exist):
+
+    - mix (default): original audio at full volume + trending track at
+      ``music_volume``, looped to the video length.
+    - duck/replace (``duck_original=True``, or video without audio): the
+      trending track becomes the only audio (at ``music_volume``).
+    - no trending file: previous behavior is unchanged.
+    """
     filter_complex, needs_wm = build_filter(
         effect_filter, custom_filters, color_grade,
         watermark_path if watermark_path and os.path.exists(watermark_path) else None,
         has_audio,
     )
+    music = trending_audio if trending_audio and os.path.exists(trending_audio) else None
+    vol = max(0.0, float(music_volume or 0.0))
+    use_mix = bool(music and has_audio and not duck_original)
+
     cmd = ["ffmpeg", "-y"]
     if trim_start:
         cmd += ["-ss", str(trim_start)]
@@ -112,18 +128,44 @@ def build_command(
     elif trim_end:
         cmd += ["-t", str(trim_end)]
     cmd += ["-i", src]
+    next_idx = 1
     if needs_wm:
         cmd += ["-i", watermark_path]
+        next_idx += 1
+    music_idx: int | None = None
+    if music:
+        if loop_audio_to and loop_audio_to > 0:
+            # Loop the track and cut the input at exactly the video length.
+            cmd += ["-stream_loop", "-1", "-t", str(loop_audio_to)]
+        music_idx = next_idx
+        cmd += ["-i", music]
+        next_idx += 1
+
+    audio_args: list[str]
+    if use_mix and music_idx is not None:
+        filter_complex += (
+            f";[{music_idx}:a]volume={vol}[a1]"
+            f";[0:a][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+        )
+        audio_args = ["-map", "[aout]", "-c:a", "aac", "-b:a", "128k", "-af", "loudnorm"]
+    elif music_idx is not None:
+        # Trending track is the only audio (ducked original or silent video).
+        audio_args = ["-map", f"{music_idx}:a", "-c:a", "aac", "-b:a", "128k",
+                      "-af", f"volume={vol},loudnorm"]
+        if not loop_audio_to:
+            audio_args = ["-shortest"] + audio_args
+    elif has_audio:
+        audio_args = ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-af", "loudnorm"]
+    else:
+        audio_args = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest", "-c:a", "aac"]
+
     cmd += [
         "-filter_complex", filter_complex,
         "-map", "[outv]",
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-movflags", "+faststart",
     ]
-    if has_audio:
-        cmd += ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-af", "loudnorm"]
-    else:
-        cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest", "-c:a", "aac"]
+    cmd += audio_args
     cmd += [dst]
     log.info("FFmpeg: %s", " ".join(shlex.quote(c) for c in cmd))
     return cmd

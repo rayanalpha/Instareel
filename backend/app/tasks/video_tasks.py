@@ -20,6 +20,7 @@ def process_video_task(self, video_id: int, effect_filter: str = "", color_grade
     from app.database import SyncSessionLocal
     from app.models import EffectPreset, Video, VideoStatus
     from app.services.video_processor import process_video_sync
+    from app.tasks import sync_helpers as sched
     from app.tasks.sync_helpers import log_event_sync, publish_sync
 
     def mark(status: VideoStatus, reason: str | None = None):
@@ -33,6 +34,23 @@ def process_video_task(self, video_id: int, effect_filter: str = "", color_grade
 
     try:
         mark(VideoStatus.processing)
+        # Trending audio: respect the video's chosen track; otherwise pick
+        # weighted-random (least-used first). Stored on the video so the
+        # processor, scheduler analytics and re-runs all agree on it.
+        with SyncSessionLocal() as s:
+            video = s.get(Video, video_id)
+            if video is not None:
+                chosen = sched.resolve_audio(s, video.audio_track)
+                if chosen is None and (video.audio_track or "").strip():
+                    log.warning("Audio track '%s' missing/inactive — picking another", video.audio_track)
+                if chosen is None:
+                    chosen = sched.pick_audio(s)
+                if chosen is not None:
+                    video.audio_track = chosen.name
+                    chosen.use_count = (chosen.use_count or 0) + 1
+                else:
+                    video.audio_track = None
+                s.commit()
         if not effect_filter:
             with SyncSessionLocal() as s:
                 video = s.get(Video, video_id)

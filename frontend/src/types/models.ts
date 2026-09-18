@@ -7,7 +7,7 @@ export interface Account {
 
 export interface Video {
   id: number; original_filename: string; duration: number | null; file_size: number | null;
-  status: string; effect_preset: string | null; add_watermark: boolean;
+  status: string; effect_preset: string | null; audio_track: string | null; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
   processed_at: string | null; thumbnail_path: string | null; created_at: string;
 }
@@ -31,6 +31,8 @@ export interface HashtagSet { id: number; name: string; tags: string; is_active:
 export interface Bio { id: number; account_id: number; text: string; link_url: string; is_active: boolean; rotation_interval_days: number; last_applied: string | null; }
 export interface Proxy { id: number; url: string; protocol: string; username: string | null; country: string | null; is_healthy: boolean; last_checked: string | null; fail_count: number; latency_ms: number | null; is_active: boolean; }
 export interface Effect { id: number; name: string; description: string; ffmpeg_filter: string; is_active: boolean; use_count: number; avg_engagement: number | null; }
+export interface AudioTrack { id: number; name: string; description: string; file_path: string; duration: number | null; music_volume: number; duck_original: boolean; is_active: boolean; use_count: number; avg_engagement: number | null; }
+export interface AudioStats { id: number; name: string; posts: number; avg_engagement: number; views: number; use_count: number; is_active: boolean; }
 export interface LogEntry { id: number; level: string; category: string; message: string; details: Record<string, unknown> | null; timestamp: string; }
 export interface Setting { key: string; value: string; category: string; is_sensitive: boolean; }
 
