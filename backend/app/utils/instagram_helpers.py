@@ -27,6 +27,90 @@ def session_path_for(username: str, media_root: str) -> str:
     return os.path.join(d, f"{safe}.json")
 
 
+def sanitize_sessionid(raw: str) -> str:
+    """Clean a pasted sessionid cookie (pure — unit tested).
+
+    DevTools copies often carry surrounding quotes/whitespace, and the value
+    is URL-encoded (``%3A`` instead of ``:``). instagrapi requires the raw
+    ``<digits>:<token>`` shape, so decode percent-escapes here.
+    """
+    import re
+    from urllib.parse import unquote
+
+    s = (raw or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    s = unquote(s)
+    return re.sub(r"\s+", "", s)
+
+
+def sessionid_owner_id(sessionid: str) -> "str | None":
+    r"""Leading user id of a sessionid (``^\d+``), or None if malformed."""
+    import re
+
+    m = re.search(r"^\d+", sessionid or "")
+    return m.group() if m else None
+
+
+def sessionid_looks_valid(sessionid: str) -> bool:
+    """Mirror of instagrapi's own login_by_sessionid preconditions."""
+    return isinstance(sessionid, str) and len(sessionid) > 30 and sessionid_owner_id(sessionid) is not None
+
+
+def parse_cookies_file(text: str) -> dict:
+    """Parse a browser cookie export into {name: value} (pure — unit tested).
+
+    Accepts Netscape cookies.txt (tab-separated, skips comments/blank lines)
+    and JSON objects (flat {name: value} or {"cookies": [...]}/{...} shapes
+    as exported by common cookie-editor extensions).
+    """
+    import json
+
+    cookies: dict[str, str] = {}
+    stripped = (text or "").strip()
+    if not stripped:
+        return cookies
+    if stripped[0] in ("{", "["):
+        try:
+            data = json.loads(stripped)
+        except ValueError:
+            return cookies
+        if isinstance(data, dict):
+            items = data.get("cookies", data)
+            if isinstance(items, dict):
+                for k, v in items.items():
+                    if isinstance(v, dict) and "value" in v:
+                        v = v["value"]
+                    cookies[str(k)] = str(v)
+            elif isinstance(items, list):
+                for entry in items:
+                    if isinstance(entry, dict) and "name" in entry:
+                        cookies[str(entry["name"])] = str(entry.get("value", ""))
+        elif isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, dict) and "name" in entry:
+                    cookies[str(entry["name"])] = str(entry.get("value", ""))
+        return cookies
+    for line in stripped.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            cookies[parts[5]] = parts[6]
+    return cookies
+
+
+def extract_sessionid(cookies: dict) -> "str | None":
+    """Sanitized sessionid from a cookie mapping, or None."""
+    for key in ("sessionid", "SessionID", "SESSIONID"):
+        if cookies.get(key):
+            candidate = sanitize_sessionid(str(cookies[key]))
+            if sessionid_looks_valid(candidate):
+                return candidate
+    return None
+
+
 def device_settings_for(username: str) -> dict:
     """Deterministic per-account device fingerprint (stable across restarts).
 

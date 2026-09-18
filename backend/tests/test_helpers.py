@@ -463,6 +463,56 @@ class TestSiblingGuard:
         asyncio.run(go())
 
 
+class TestSessionCookieHelpers:
+    def test_sanitize_strips_quotes_whitespace_and_decoding(self):
+        from app.utils.instagram_helpers import sanitize_sessionid
+
+        assert sanitize_sessionid('  "12345%3Aabcdef%20XYZ"  ') == "12345:abcdefXYZ"
+        assert sanitize_sessionid("12345:abc def") == "12345:abcdef"
+        assert sanitize_sessionid("") == ""
+
+    def test_validity_mirrors_instagrapi_gate(self):
+        from app.utils.instagram_helpers import sessionid_looks_valid, sessionid_owner_id
+
+        good = "1234567890:" + "AbC123xYz" * 4
+        assert sessionid_owner_id(good) == "1234567890"
+        assert sessionid_looks_valid(good) is True
+        assert sessionid_looks_valid("short") is False
+        assert sessionid_looks_valid("no-leading-digits-here-xxxxxxxxxx") is False
+        assert sessionid_looks_valid("") is False
+
+    def test_parse_netscape_cookies_file(self):
+        from app.utils.instagram_helpers import extract_sessionid, parse_cookies_file
+
+        raw = (
+            "# Netscape HTTP Cookie File\n"
+            ".instagram.com\tTRUE\t/\tTRUE\t0\tsessionid\t12345%3AabcDEF12345678901234567890\n"
+            ".instagram.com\tTRUE\t/\tTRUE\t0\tcsrftoken\tXYZ\n"
+            "\n"
+            "garbage-line-without-tabs\n"
+        )
+        cookies = parse_cookies_file(raw)
+        assert cookies["sessionid"].startswith("12345")
+        assert cookies["csrftoken"] == "XYZ"
+        assert extract_sessionid(cookies) == "12345:abcDEF12345678901234567890"
+
+    def test_parse_json_cookie_exports(self):
+        from app.utils.instagram_helpers import extract_sessionid, parse_cookies_file
+
+        flat = '{"sessionid": "999%3A' + "z" * 30 + '", "other": "1"}'
+        assert extract_sessionid(parse_cookies_file(flat)) == "999:" + "z" * 30
+        listed = '{"cookies": [{"name": "sessionid", "value": "777:' + "q" * 30 + '"}]}'
+        assert extract_sessionid(parse_cookies_file(listed)) == "777:" + "q" * 30
+        assert parse_cookies_file("") == {}
+        assert parse_cookies_file("{not json") == {}
+
+    def test_extract_rejects_truncated_cookie(self):
+        from app.utils.instagram_helpers import extract_sessionid
+
+        assert extract_sessionid({"sessionid": "12345:abc"}) is None
+        assert extract_sessionid({}) is None
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
