@@ -108,7 +108,7 @@ class TestDefaultEffects:
         from app.services.default_effects import DEFAULT_EFFECT_PRESETS
 
         names = [p["name"] for p in DEFAULT_EFFECT_PRESETS]
-        assert len(names) >= 10
+        assert len(names) >= 40
         assert len(set(names)) == len(names)
         for name in names:
             assert 1 <= len(name) <= 128
