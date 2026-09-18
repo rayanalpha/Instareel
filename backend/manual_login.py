@@ -15,13 +15,14 @@ Usage (from the backend folder):
 If Instagram asks for a verification code, grab it from SMS/email and run
 the same command again passing it as the third argument.
 """
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.config import settings  # noqa: E402
-from app.utils.instagram_helpers import device_settings_for  # noqa: E402
+from app.utils.instagram_helpers import device_settings_for, session_path_for  # noqa: E402
 
 
 def main() -> None:
@@ -46,15 +47,14 @@ def main() -> None:
         print(f'    python manual_login.py "{username}" <password> <code_from_sms>')
         sys.exit(1)
 
-    out_dir = Path("sessions")
-    out_dir.mkdir(exist_ok=True)
-    out = out_dir / f"{username}.json"
+    # Same safe filename the server expects (dots -> underscores).
+    out = Path(session_path_for(username, os.getcwd()))
     cl.dump_settings(str(out))
     print(f"\nOK — session saved to {out}")
     print("Next steps:")
-    print(f"  1. Copy {out} to the server as:")
-    print(f'     {settings.MEDIA_ROOT}/sessions/{username}.json')
-    print("  2. In the dashboard press 'Test session' — it should say the session is valid.")
+    print(f"  1. In the dashboard: Accounts -> Upload session, and select {out.name}")
+    print(f"     (or copy it to the server as {settings.MEDIA_ROOT}/sessions/{out.name})")
+    print("  2. Press 'Test session' — it should say the session is valid.")
 
 
 if __name__ == "__main__":
