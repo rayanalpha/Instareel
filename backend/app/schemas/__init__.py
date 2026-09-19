@@ -22,6 +22,7 @@ from app.schemas.content import (
     ScheduleRuleIn,
     ScheduleRuleOut,
     SettingOut,
+    SettingUpdate,
 )
 from app.schemas.video import PostOut, SchedulePostIn, VideoOut, VideoSettingsUpdate
 
@@ -31,5 +32,5 @@ __all__ = [
     "AudioIn", "AudioOut",
     "BioIn", "BioOut", "CaptionIn", "CaptionOut", "EffectIn", "EffectOut",
     "HashtagSetIn", "HashtagSetOut", "LogOut", "ScheduleRuleIn", "ScheduleRuleOut",
-    "SettingOut", "PostOut", "SchedulePostIn", "VideoOut", "VideoSettingsUpdate",
+    "SettingOut", "SettingUpdate", "PostOut", "SchedulePostIn", "VideoOut", "VideoSettingsUpdate",
 ]

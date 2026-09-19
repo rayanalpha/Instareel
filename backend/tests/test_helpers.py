@@ -752,6 +752,32 @@ class TestApplyProfile:
         assert "login" in kinds and "edit" in kinds
 
 
+class TestRateLimitWiring:
+    def test_login_brute_force_trips_429(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            codes = [
+                client.post(
+                    "/api/v1/auth/login", json={"username": "nope", "password": "nope"}
+                ).status_code
+                for _ in range(7)
+            ]
+        assert 401 in codes  # wrong creds rejected...
+        assert codes[-1] == 429  # ...and the 6th+ rapid hit is rate-limited
+
+    def test_slowapi_middleware_installed(self):
+        from slowapi.middleware import SlowAPIMiddleware
+
+        from app.main import app
+
+        assert any(
+            getattr(m, "cls", None) is SlowAPIMiddleware for m in app.user_middleware
+        )
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

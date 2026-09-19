@@ -204,6 +204,20 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def as_aware_utc(ts: "dt.datetime | None") -> "dt.datetime | None":
+    """Normalize a DB datetime for comparison (central timezone guard).
+
+    SQLite returns naive datetimes while Postgres returns aware ones;
+    comparing either against aware ``now`` raises TypeError. Pass every
+    DB timestamp through here before comparing or subtracting.
+    """
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=dt.timezone.utc)
+    return ts
+
+
 def due_rules(session, at: "dt.datetime | None" = None):
     from app.models import ScheduleRule
 
@@ -224,7 +238,8 @@ def eligible_account(session, account_id: "int | None" = None):
     if account_id:
         acc = session.get(Account, account_id)
         if acc and acc.status == AccountStatus.active:
-            if not acc.cooldown_until or acc.cooldown_until <= now:
+            cd = as_aware_utc(acc.cooldown_until)
+            if not cd or cd <= now:
                 if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
                     return acc
         return None

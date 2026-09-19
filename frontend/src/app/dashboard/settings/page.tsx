@@ -23,7 +23,7 @@ export default function SettingsPage() {
             <form
               key={s.key}
               className="flex items-center gap-2 border-t border-zinc-100 py-2 first:border-0 dark:border-zinc-800"
-              onSubmit={(e) => { e.preventDefault(); save.mutate({ url: `/settings/${s.key}`, body: (e.target as HTMLFormElement).value.value }); }}
+              onSubmit={(e) => { e.preventDefault(); save.mutate({ url: `/settings/${s.key}`, body: { value: (e.target as HTMLFormElement).value.value } }); }}
             >
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-xs font-semibold">{s.key}</p>

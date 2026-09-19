@@ -5,13 +5,20 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 
 log = logging.getLogger("igfunnel.http")
 
 
-def setup_middleware(app: FastAPI) -> None:
+def setup_middleware(app: FastAPI, limiter: Limiter | None = None) -> None:
+    # Without SlowAPIMiddleware every @limiter.limit decorator is a silent
+    # no-op — login brute-force protection depends on this call.
+    if limiter is not None:
+        app.state.limiter = limiter
+        app.add_middleware(SlowAPIMiddleware)
     origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,

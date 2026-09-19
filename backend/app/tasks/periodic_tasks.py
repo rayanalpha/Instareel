@@ -49,7 +49,7 @@ def fetch_all_analytics():
             items = [
                 (p.id, p.account_id, p.ig_media_id, p.posted_at)
                 for p in posts
-                if p.last_analytics_check is None or p.last_analytics_check <= recent
+                if (last := sched.as_aware_utc(p.last_analytics_check)) is None or last <= recent
             ][:MAX_ANALYTICS_PER_RUN]
         updated = 0
         for pid, acc_id, media_id, posted_at in items:
@@ -127,7 +127,11 @@ def check_bio_rotation():
         now = dt.datetime.now(dt.timezone.utc)
         with SyncSessionLocal() as s:
             bios = s.execute(select(BioConfig).where(BioConfig.is_active.is_(True))).scalars().all()
-            due = [b for b in bios if not b.last_applied or (now - b.last_applied).days >= b.rotation_interval_days]
+            due = []
+            for b in bios:
+                last = sched.as_aware_utc(b.last_applied)
+                if last is None or (now - last).days >= b.rotation_interval_days:
+                    due.append(b)
             items = [
                 (b.id, b.account_id, b.text, b.link_url, b.full_name, b.profile_pic_path, b.make_private)
                 for b in due

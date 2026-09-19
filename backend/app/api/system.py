@@ -16,7 +16,7 @@ from app.config import settings
 from app.core.security import decode_token
 from app.database import SessionLocal
 from app.models import LogLevel, Post, PostStatus, Setting, SystemLog, Video
-from app.schemas.content import LogOut, SettingOut
+from app.schemas.content import LogOut, SettingOut, SettingUpdate
 from app.services import analytics_service, log_service
 
 analytics_router = APIRouter()
@@ -177,14 +177,28 @@ async def list_settings(_: str = Depends(get_current_admin), db: AsyncSession = 
     return [SettingOut(key=s.key, value=(MASKED if s.is_sensitive and s.value else s.value), category=s.category, is_sensitive=s.is_sensitive) for s in rows]
 
 
-@settings_router.put("/{key}", response_model=SettingOut)
-async def update_setting(key: str, value: str, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+@settings_router.put("/{key}", response_model=SettingOut, status_code=200)
+async def update_setting(
+    key: str, body: SettingUpdate,
+    _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db),
+):
+    """Update an existing setting (JSON body: {"value": ...}).
+
+    Arbitrary key creation is rejected: unknown keys 404 with the known key
+    list instead of silently polluting the table. (The old query-param
+    contract is gone — the dashboard sends a JSON body.)
+    """
+    if len(key) > 128 or not key.replace("_", "").replace("-", "").replace(".", "").isalnum():
+        raise HTTPException(400, "Invalid setting key")
     s = await db.get(Setting, key)
     if not s:
-        s = Setting(key=key, value=value, category="general")
+        if key not in DEFAULT_SETTINGS:
+            known = sorted(DEFAULT_SETTINGS)
+            raise HTTPException(404, f"Unknown setting. Known keys: {known}")
+        s = Setting(key=key, value=body.value, category=DEFAULT_SETTINGS[key][1])
         db.add(s)
     else:
-        s.value = value
+        s.value = body.value
         s.updated_at = dt.datetime.now(dt.timezone.utc)
     await db.commit()
     await db.refresh(s)

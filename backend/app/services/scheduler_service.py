@@ -45,11 +45,14 @@ def effective_max_posts(
 
 
 async def eligible_account(session, account_id: int | None = None) -> Account | None:
+    from app.tasks.sync_helpers import as_aware_utc
+
     now = _now()
     if account_id:
         acc = await session.get(Account, account_id)
         if acc and acc.status == AccountStatus.active:
-            if not acc.cooldown_until or acc.cooldown_until <= now:
+            cd = as_aware_utc(acc.cooldown_until)
+            if not cd or cd <= now:
                 if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
                     return acc
         return None

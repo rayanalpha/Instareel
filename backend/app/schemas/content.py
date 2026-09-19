@@ -89,6 +89,10 @@ class AudioOut(AudioIn):
     avg_engagement: float | None
 
 
+class SettingUpdate(BaseModel):
+    value: str = Field(min_length=1, max_length=5000)
+
+
 class SettingOut(BaseModel):
     key: str
     value: str

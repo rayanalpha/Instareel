@@ -18,9 +18,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 log = logging.getLogger("igfunnel")
 
 app = FastAPI(title="IG Funnel API", version="1.0.0")
-app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-setup_middleware(app)
+setup_middleware(app, limiter)
 
 
 @app.exception_handler(AppError)
