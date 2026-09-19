@@ -3,15 +3,20 @@ version: "3.9"
 x-backend-env: &backend-env
   DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/app.db}
   SYNC_DATABASE_URL: ${SYNC_DATABASE_URL:-sqlite:////data/app.db}
-  REDIS_URL: redis://redis:6379/0
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   MEDIA_ROOT: /data/media
 
+# Single source of truth: host ./data holds app.db, ./media holds uploads.
+# (A previous revision stacked appdata:/data UNDER ./data:/data — the bind
+# shadowed the named volume, so it was removed.)
 x-app-volumes: &app-volumes
-  - appdata:/data
   - ./data:/data
   - ./media:/data/media
 
 services:
+  # Opt-in profile: backend must ALSO get DATABASE_URL + SYNC_DATABASE_URL
+  # pointing at postgres (see .env.example) — there is intentionally no
+  # depends_on from backend, which stays SQLite by default.
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -77,10 +82,11 @@ services:
     command: celery -A app.tasks.celery_app.celery beat --loglevel=info
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:8000}
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:8000}
     depends_on:
       - backend
 
@@ -100,4 +106,3 @@ services:
 volumes:
   pgdata:
   redisdata:
-  appdata:

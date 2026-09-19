@@ -3,10 +3,14 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 
+# NEXT_PUBLIC_API_URL is baked at build time — pass it as a build arg
+# (compose does this from FRONTEND_API_URL); a runtime -e value alone is ignored.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 FROM node:20-alpine AS runner

@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Required by frontend/Dockerfile (copies .next/standalone + server.js).
+  output: "standalone",
   async rewrites() {
     // Proxy /api/* to FastAPI so the browser always talks same-origin
     // (no CORS, no ORB). NEXT_PUBLIC_API_URL is baked at build time.

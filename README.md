@@ -11,12 +11,11 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- Frontend: http://localhost:3000 (or http://localhost:8080 via nginx profile)
-- API: http://localhost:8000 — health at `/health`, docs at `/docs`
+- With the nginx profile (`docker compose --profile nginx up --build`), the whole
+  stack is served on `${NGINX_PORT:-8080}`: `/` → frontend, `/api/*` + `/ws` → backend.
+- API docs (`/docs`, `/openapi.json`) are reachable directly on the backend
+  (`http://localhost:8000/docs` in local dev) or via the nginx profile.
 - Login with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
-
-With the nginx profile (`docker compose --profile nginx up`), the whole stack is
-served on `${NGINX_PORT:-8080}`: `/` → frontend, `/api/*` + `/ws` → backend.
 
 ## Services
 
@@ -29,7 +28,7 @@ served on `${NGINX_PORT:-8080}`: `/` → frontend, `/api/*` + `/ws` → backend.
 | frontend | Next.js 14 dashboard |
 | postgres | Optional — enable with `DATABASE_URL=postgresql+asyncpg://…` and `--profile postgres` |
 
-Default is SQLite (`./data/app.db` via the `appdata` volume) — zero-config.
+Default is SQLite (`./data/app.db` bind-mounted from the repo root) — zero-config.
 
 ## Local dev (no Docker)
 
@@ -42,7 +41,7 @@ cp ../.env.example ../.env   # or set env vars
 uvicorn app.main:app --reload
 celery -A app.tasks.celery_app.celery worker --loglevel=info
 celery -A app.tasks.celery_app.celery beat --loglevel=info
-alembic upgrade head          # optional — app also auto-creates tables on startup
+alembic upgrade head          # REQUIRED on existing DBs — startup only creates missing *tables*, never new *columns*
 ```
 
 Frontend:
@@ -59,15 +58,17 @@ NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 2. **Proxies** → add proxies, health-check them.
 3. **Effects** → review FFmpeg presets (applied after 720×1280 crop/scale).
 4. **Captions / Hashtags** → seed pools (3–5 tags/post auto-rotated).
-5. **Bios** - per-account bio + external bot link (e.g. https://t.me/your_external_bot), rotation interval.`n6. **Schedule** → rules (day/hour/minute); beat creates posts every minute with ±5 min jitter.
-8. **Videos → Upload** → auto-processes (or trigger manually), then auto-posts at the next due slot.
+5. **Bios** — per-account bio + external bot link (e.g. https://t.me/your_external_bot), rotation interval.
+6. **Schedule** → rules (day/hour/minute); beat creates posts every minute with ±5 min jitter.
+7. **Videos → Upload** → auto-processes (or trigger manually), then auto-posts at the next due slot.
 
 ## Database
 
-Alembic migration `0001_initial` covers all tables. SQLite auto-creates on
-startup; for Postgres run `alembic upgrade head`. Models live in
-`backend/app/models/`; secrets (IG passwords, proxy passwords) are
-Fernet-encrypted at rest — set a persistent `FERNET_KEY` in `.env`.
+Alembic migrations `0001_initial` → `0002_audio_tracks` → `0003_bio_profile`
+cover the whole schema — always run `alembic upgrade head` after pulling.
+Models live in `backend/app/models/`; secrets (IG passwords, proxy passwords)
+are Fernet-encrypted at rest — set a persistent `FERNET_KEY` in `.env`
+(changing it later makes stored credentials unreadable).
 
 ## Troubleshooting
 
@@ -75,6 +76,6 @@ Fernet-encrypted at rest — set a persistent `FERNET_KEY` in `.env`.
 |---------|-----|
 | Login fails | Check `ADMIN_USERNAME`/`ADMIN_PASSWORD` in `.env` (backend reads them at startup). |
 | Video stuck in processing | Check worker logs; FFmpeg stderr is stored in `failed_reason` + SystemLog. |
-| `challenge_required` account | Log in manually in the IG app, then **Accounts → Login** to refresh the session. |
-| Throttled / cooldown | Account auto-cools for 24h; post retries with a different account. |
-| WS not updating | Frontend falls back to polling (5–15s); check Redis is reachable. |
+| `challenge_required` account | Import a fresh session (**Accounts → Upload session**, built via `backend/session_from_browser.py` or `manual_login.py` on a residential IP), then **Test session**. Never password-login from the server IP. |
+| Throttled / cooldown | Exponential backoff (6h → 12h → 24h) with automatic rotation to a spare proxy. |
+| WS not updating | Token is sent as the first WS message (never in the URL); frontend falls back to polling (30–60s); check Redis is reachable. |

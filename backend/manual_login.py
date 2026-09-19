@@ -1,9 +1,9 @@
 """One-off manual Instagram login helper.
 
 Run this on YOUR PC (residential IP — Instagram rarely challenges home IPs),
-then copy the produced session file to the server:
-
-    backend/media/sessions/<username>.json
+then upload the produced file via the dashboard (Accounts -> Upload session).
+It lands at session_path_for(username, MEDIA_ROOT) on the server, so never
+rename it by hand (dots become underscores automatically).
 
 After that, "Test session" in the dashboard should report the session as
 valid, and workers can post without a server-side login.

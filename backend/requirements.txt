@@ -7,7 +7,6 @@ alembic==1.14.0
 celery[redis]==5.4.0
 redis==5.2.1
 instagrapi==3.0.2
-python-telegram-bot==21.6
 pydantic>=2.9
 pydantic-settings==2.6.1
 pyjwt==2.10.1
@@ -16,7 +15,9 @@ cryptography==43.0.3
 slowapi==0.1.9
 python-multipart==0.0.19
 aiofiles==24.1.0
+# NOTE: SOCKS proxies intentionally use the TCP check only (no httpx[socks]
+# extra) — the end-to-end HTTPS check runs for http(s) proxies.
 httpx==0.28.1
-psutil==6.1.0
+# Sync driver for Celery workers when SYNC_DATABASE_URL is postgresql+psycopg2.
+psycopg2-binary==2.9.9
 Pillow>=8.1.1
-curl-cffi>=0.15.0
