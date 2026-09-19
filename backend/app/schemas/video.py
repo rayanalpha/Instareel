@@ -11,6 +11,7 @@ class VideoOut(BaseModel):
     status: str
     effect_preset: str | None
     audio_track: str | None
+    custom_filters: str | None
     add_watermark: bool
     trim_start: float | None
     trim_end: float | None
@@ -24,8 +25,8 @@ class VideoSettingsUpdate(BaseModel):
     effect_preset: str | None = None
     audio_track: str | None = None
     custom_filters: str | None = None
-    trim_start: float | None = None
-    trim_end: float | None = None
+    trim_start: float | None = Field(default=None, ge=0)
+    trim_end: float | None = Field(default=None, ge=0)
     add_watermark: bool | None = None
 
 

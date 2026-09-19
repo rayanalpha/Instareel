@@ -166,7 +166,7 @@ def check_bio_rotation():
                             b.last_applied = now
                             s.commit()
                     applied += 1
-                    log_event_sync("INFO", "account", f"Bio rotated for account {acc_id}")
+                    log_event_sync("INFO", "account", f"Bio rotated for account {acc_id}", {"bio_id": bid})
             except Exception:
                 log.exception("bio rotation failed for %s", bid)
         return {"due": len(items), "applied": applied}
@@ -179,6 +179,7 @@ def check_bio_rotation():
 def check_all_proxies():
     import random
     import time
+    from types import SimpleNamespace
 
     from sqlalchemy import select
 
@@ -201,11 +202,20 @@ def check_all_proxies():
             ids = [p.id for p in s.execute(select(Proxy)).scalars().all()]
         results = []
         for pid in ids:
+            # Snapshot credentials first, then check WITHOUT holding the DB
+            # transaction open — a 10-25s network check must never pin a
+            # connection (SQLite lock contention / PG idle-in-transaction).
             with SyncSessionLocal() as s:
                 p = s.get(Proxy, pid)
                 if not p:
                     continue
-                ok, latency = check_proxy_sync(p)
+                snap = (p.url, p.username, p.password_enc)
+            probe = SimpleNamespace(id=pid, url=snap[0], username=snap[1], password_enc=snap[2])
+            ok, latency = check_proxy_sync(probe)
+            with SyncSessionLocal() as s:
+                p = s.get(Proxy, pid)
+                if not p:
+                    continue
                 p.is_healthy = ok
                 p.latency_ms = latency
                 p.last_checked = dt.datetime.now(dt.timezone.utc)

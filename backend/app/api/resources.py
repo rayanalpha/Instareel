@@ -130,7 +130,7 @@ async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
         if b:
             b.last_applied = dt.datetime.now(dt.timezone.utc)
             await db.commit()
-    await log_event("INFO", "account", f"Profile force-applied to account {acc_id}")
+    await log_event("INFO", "account", f"Profile force-applied to account {acc_id}", {"bio_id": bid})
     return {"ok": True}
 
 
@@ -251,12 +251,15 @@ async def bio_history(bid: int, _: str = Depends(get_current_admin), db: AsyncSe
     b = await db.get(BioConfig, bid)
     if not b:
         raise HTTPException(404, "Bio not found")
+    # Only this config's own events (tagged with bio_id at write time) —
+    # previously this leaked the global account log into every bio card.
     rows = (
         await db.execute(
-            select(SystemLog).where(SystemLog.category == "account").order_by(SystemLog.timestamp.desc()).limit(50)
+            select(SystemLog).where(SystemLog.category == "account").order_by(SystemLog.timestamp.desc()).limit(200)
         )
     ).scalars().all()
-    return [{"message": r.message, "timestamp": r.timestamp} for r in rows]
+    mine = [r for r in rows if (r.details or {}).get("bio_id") == bid][:50]
+    return [{"message": r.message, "timestamp": r.timestamp} for r in mine]
 
 
 # ---- Proxies ----

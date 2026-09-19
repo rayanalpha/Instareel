@@ -21,11 +21,17 @@ async def overview(session, since: dt.datetime | None = None) -> dict:
         eng_q = eng_q.where(Post.posted_at >= since)
     avg_eng = (await session.execute(eng_q)).scalar() or 0.0
 
+    from app.models import AccountStatus, VideoStatus
+
     active_accounts = (
-        await session.execute(select(func.count(Account.id)).where(Account.status == "active"))
+        await session.execute(select(func.count(Account.id)).where(Account.status == AccountStatus.active))
     ).scalar() or 0
     queue = (
-        await session.execute(select(func.count(Video.id)).where(Video.status.in_(["uploaded", "processing", "processed"])))
+        await session.execute(
+            select(func.count(Video.id)).where(
+                Video.status.in_([VideoStatus.uploaded, VideoStatus.processing, VideoStatus.processed])
+            )
+        )
     ).scalar() or 0
     scheduled = (
         await session.execute(select(func.count(Post.id)).where(Post.status == PostStatus.scheduled))
@@ -66,7 +72,7 @@ async def account_comparison(session) -> list[dict]:
                 func.coalesce(func.sum(Post.views_7d), 0),
                 func.avg(Post.engagement_rate),
             )
-            .outer_join(Post, (Post.account_id == Account.id) & (Post.status == PostStatus.posted))
+            .outerjoin(Post, (Post.account_id == Account.id) & (Post.status == PostStatus.posted))
             .group_by(Account.id, Account.username)
             .order_by(func.coalesce(func.sum(Post.views_7d), 0).desc())
         )

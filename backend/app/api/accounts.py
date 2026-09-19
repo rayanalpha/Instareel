@@ -3,7 +3,7 @@ import datetime as dt
 import json
 import os
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -242,7 +242,10 @@ async def delete_session(account_id: int, _: str = Depends(get_current_admin), d
 
 
 @router.post("/{account_id}/cooldown")
-async def set_cooldown(account_id: int, hours: int = 24, _: str = Depends(get_current_admin)):
+async def set_cooldown(
+    account_id: int, hours: int = Query(default=24, ge=0, le=720),
+    _: str = Depends(get_current_admin),
+):
     async with SessionLocal() as db:
         acc = await db.get(Account, account_id)
         if not acc:

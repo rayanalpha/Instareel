@@ -28,7 +28,7 @@ def _out(v: Video) -> VideoOut:
     return VideoOut(
         id=v.id, original_filename=v.original_filename, duration=v.duration, file_size=v.file_size,
         status=v.status.value, effect_preset=v.effect_preset, audio_track=v.audio_track,
-        add_watermark=v.add_watermark,
+        custom_filters=v.custom_filters, add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
         processed_at=v.processed_at, thumbnail_path=v.thumbnail_path, created_at=v.created_at,
     )
@@ -63,15 +63,16 @@ async def list_videos(
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Video).order_by(desc(Video.created_at)).limit(limit)
+    q = select(Video)
     if status:
         try:
-            q = select(Video).where(Video.status == VideoStatus(status)).order_by(desc(Video.created_at)).limit(limit)
+            q = q.where(Video.status == VideoStatus(status))
         except ValueError:
             raise HTTPException(400, "Invalid status")
-    rows = (await db.execute(q)).scalars().all()
     if search:
-        rows = [v for v in rows if search.lower() in v.original_filename.lower()]
+        q = q.where(Video.original_filename.ilike(f"%{search}%"))
+    q = q.order_by(desc(Video.created_at)).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
     return [_out(v) for v in rows]
 
 
@@ -194,6 +195,8 @@ async def reprocess(video_id: int, effect_filter: str = "", _: str = Depends(get
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
+    if v.status == VideoStatus.processing:
+        raise HTTPException(409, "Already processing")
     from app.tasks.video_tasks import process_video_task
 
     process_video_task.delay(video_id, effect_filter)
@@ -214,6 +217,8 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
+    if body.trim_start is not None and body.trim_end is not None and body.trim_end <= body.trim_start:
+        raise HTTPException(400, "trim_end must be greater than trim_start")
     for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end", "add_watermark"):
         val = getattr(body, field)
         if val is not None:
@@ -258,15 +263,16 @@ async def list_posts(
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Post).order_by(desc(Post.created_at)).limit(limit)
+    q = select(Post)
     if status:
         try:
-            q = select(Post).where(Post.status == PostStatus(status)).order_by(desc(Post.created_at)).limit(limit)
+            q = q.where(Post.status == PostStatus(status))
         except ValueError:
             raise HTTPException(400, "Invalid status")
-    rows = (await db.execute(q)).scalars().all()
     if account_id:
-        rows = [p for p in rows if p.account_id == account_id]
+        q = q.where(Post.account_id == account_id)
+    q = q.order_by(desc(Post.created_at)).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
     audio = await _audio_map(db, [p.video_id for p in rows])
     return [_post_out(p, audio.get(p.video_id)) for p in rows]
 

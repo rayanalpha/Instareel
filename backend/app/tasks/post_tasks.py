@@ -59,9 +59,9 @@ def check_and_post(self):
                     )
                 )
                 s.flush()  # make the reservation visible to later rules in this tick
+                s.commit()  # per-rule commit: one bad rule can't void the whole tick
                 used_video_ids.add(video.id)
                 created += 1
-            s.commit()
 
             now = dt.datetime.now(dt.timezone.utc)
             due = (

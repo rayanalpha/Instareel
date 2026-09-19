@@ -127,14 +127,18 @@ async def list_logs(
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(SystemLog).order_by(desc(SystemLog.timestamp)).limit(limit)
-    rows = (await db.execute(q)).scalars().all()
+    q = select(SystemLog)
     if level:
-        rows = [r for r in rows if r.level.value == level.upper()]
+        try:
+            q = q.where(SystemLog.level == LogLevel[level.upper()])
+        except KeyError:
+            raise HTTPException(400, f"Invalid level (known: {[e.value for e in LogLevel]})")
     if category:
-        rows = [r for r in rows if r.category == category]
+        q = q.where(SystemLog.category == category)
     if search:
-        rows = [r for r in rows if search.lower() in r.message.lower()]
+        q = q.where(SystemLog.message.ilike(f"%{search}%"))
+    q = q.order_by(desc(SystemLog.timestamp)).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
     return [LogOut(id=r.id, level=r.level.value, category=r.category, message=r.message, details=r.details, timestamp=r.timestamp) for r in rows]
 
 
@@ -145,7 +149,10 @@ async def logs_stats(_: str = Depends(get_current_admin), db: AsyncSession = Dep
 
 
 @logs_router.delete("", status_code=204)
-async def clear_logs(older_than_days: int = 30, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def clear_logs(
+    older_than_days: int = Query(default=30, ge=0, le=3650),
+    _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db),
+):
     from sqlalchemy import delete
 
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=older_than_days)

@@ -184,20 +184,47 @@ def _parse_time_token(line: str, duration: float) -> float | None:
 
 
 def run_sync_with_progress(cmd: list[str], duration: float, on_progress) -> None:
-    """Blocking ffmpeg runner (Celery-safe). Reads stderr line by line via Popen."""
+    """Blocking ffmpeg runner (Celery-safe). Reads stderr line by line via Popen.
+
+    Bounded: a hung encode is killed after a duration-scaled timeout so one
+    bad file can never wedge the (solo-pool) worker forever.
+    """
+    timeout = max(600.0, (duration or 0) * 10.0)
     proc = subprocess.Popen(
         cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1
     )
     assert proc.stderr is not None
     stderr_tail: list[str] = []
-    for line in proc.stderr:
-        line = line.strip()
-        if line:
-            stderr_tail.append(line[-500:])
-            pct = _parse_time_token(line, duration)
-            if pct is not None:
-                on_progress(pct, "processing")
-    rc = proc.wait()
+    try:
+        # A timer enforces the bound even while blocked reading stderr: on
+        # expiry the process is killed and wait() raises TimeoutExpired.
+        import threading
+
+        def _kill():
+            try:
+                proc.kill()  # no-op if already exited (no zombie: wait() reaps)
+            except OSError:
+                pass
+
+        timer = threading.Timer(timeout, _kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            for line in proc.stderr:
+                line = line.strip()
+                if line:
+                    stderr_tail.append(line[-500:])
+                    pct = _parse_time_token(line, duration)
+                    if pct is not None:
+                        on_progress(pct, "processing")
+        finally:
+            timer.cancel()
+        rc = proc.wait()
+    finally:
+        try:
+            proc.stderr.close()
+        except Exception:
+            pass
     if rc != 0:
         raise RuntimeError("FFmpeg failed: " + " | ".join(stderr_tail[-8:]))
 

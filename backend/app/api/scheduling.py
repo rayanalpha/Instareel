@@ -30,6 +30,13 @@ async def list_rules(_: str = Depends(get_current_admin), db: AsyncSession = Dep
 
 @schedule_router.post("", response_model=ScheduleRuleOut, status_code=201)
 async def create_rule(body: ScheduleRuleIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    # SQLite doesn't enforce FKs — validate here so rules can't orphan.
+    from app.models import Account, CaptionTemplate
+
+    if body.account_id is not None and await db.get(Account, body.account_id) is None:
+        raise HTTPException(404, "Account not found")
+    if body.caption_template_id is not None and await db.get(CaptionTemplate, body.caption_template_id) is None:
+        raise HTTPException(404, "Caption template not found")
     r = ScheduleRule(**body.model_dump())
     db.add(r)
     await db.commit()

@@ -24,13 +24,18 @@ def process_video_task(self, video_id: int, effect_filter: str = "", color_grade
     from app.tasks.sync_helpers import log_event_sync, publish_sync
 
     def mark(status: VideoStatus, reason: str | None = None):
-        with SyncSessionLocal() as s:
-            v = s.get(Video, video_id)
-            if v:
-                v.status = status
-                if reason is not None:
-                    v.failed_reason = reason[:2000]
-                s.commit()
+        try:
+            with SyncSessionLocal() as s:
+                v = s.get(Video, video_id)
+                if v:
+                    v.status = status
+                    if reason is not None:
+                        v.failed_reason = reason[:2000]
+                    s.commit()
+        except Exception:
+            # DB itself down: log only, so the outer handler can still
+            # return a graceful {"status": "failed"} instead of crashing.
+            log.exception("mark(%s) failed for video %s", status, video_id)
 
     try:
         mark(VideoStatus.processing)

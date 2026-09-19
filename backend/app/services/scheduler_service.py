@@ -128,6 +128,8 @@ async def pick_caption(session, template_id: int | None) -> tuple[str, int | Non
         return "", None
     weights = [1.0 / (1.0 + (r.use_count or 0)) for r in rows]
     chosen = random.choices(rows, weights=weights, k=1)[0]
+    # Feed the weighting: without this the least-used bias never learns.
+    chosen.use_count = (chosen.use_count or 0) + 1
     return chosen.content, chosen.id
 
 

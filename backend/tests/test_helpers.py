@@ -778,6 +778,42 @@ class TestRateLimitWiring:
         )
 
 
+class TestAnalyticsQueries:
+    def test_account_comparison_runs(self):
+        import asyncio
+        import datetime as dt
+
+        async def go():
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from app.database import Base
+            from app.models import Account, Post, PostStatus, Video
+            from app.services import analytics_service
+
+            engine = create_async_engine("sqlite+aiosqlite://")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as s:
+                s.add(Account(username="cmp1", password_enc="x"))
+                s.add(Video(original_filename="v.mp4", raw_path="/tmp/v.mp4", md5_hash="cmp1"))
+                await s.flush()
+                acc_id = (await s.execute(select(Account).where(Account.username == "cmp1"))).scalar_one().id
+                vid_id = (await s.execute(select(Video).where(Video.md5_hash == "cmp1"))).scalar_one().id
+                s.add(Post(
+                    video_id=vid_id, account_id=acc_id, status=PostStatus.posted,
+                    posted_at=dt.datetime.now(dt.timezone.utc),
+                    views_7d=100, likes_7d=10, engagement_rate=10.0,
+                ))
+                await s.commit()
+                rows = await analytics_service.account_comparison(s)
+                assert rows and rows[0]["username"] == "cmp1"
+                assert rows[0]["posts"] == 1 and rows[0]["views"] == 100
+            await engine.dispose()
+
+        asyncio.run(go())
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
