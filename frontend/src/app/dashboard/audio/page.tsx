@@ -1,14 +1,14 @@
 "use client";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useAudioStats, useAudios } from "@/hooks/use-api";
 import { api } from "@/lib/api";
 import type { AudioStats, AudioTrack } from "@/types/models";
 
 export default function AudioPage() {
   const qc = useQueryClient();
-  const { data, isLoading } = useAudios();
+  const { data, isLoading, isError, refetch } = useAudios();
   const { data: stats } = useAudioStats();
   const remove = useApiMutation("delete", [["audio"], ["audio-stats"]]);
   const toggle = useApiMutation("put", [["audio"], ["audio-stats"]]);
@@ -72,7 +72,7 @@ export default function AudioPage() {
         <div className="mt-3"><Field label="Description"><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Viral hook — 15s chorus" /></Field></div>
         {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
       </Card>
-      {isLoading ? <Spinner /> : tracks.length === 0 ? <EmptyState title="No tracks" hint="Upload trending sounds above — processing auto-picks from active tracks." /> : (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : tracks.length === 0 ? <EmptyState title="No tracks" hint="Upload trending sounds above — processing auto-picks from active tracks." /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {tracks.map((t) => {
             const s = byName.get(t.name);

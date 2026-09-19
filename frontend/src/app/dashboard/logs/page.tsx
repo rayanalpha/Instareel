@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Card, EmptyState, Spinner } from "@/components/ui";
+import { Card, EmptyState, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useLogs } from "@/hooks/use-api";
 import type { LogEntry } from "@/types/models";
 
@@ -10,7 +10,7 @@ const COLORS: Record<string, string> = {
 };
 
 export default function LogsPage() {
-  const { data, isLoading } = useLogs();
+  const { data, isLoading, isError, refetch } = useLogs();
   const clear = useApiMutation("delete", [["logs"]]);
   const [level, setLevel] = useState("");
   const [category, setCategory] = useState("");
@@ -32,7 +32,7 @@ export default function LogsPage() {
         </select>
         <button className="btn-ghost !py-2 text-xs" onClick={() => { if (confirm("Delete logs older than 30 days?")) clear.mutate({ url: "/logs?older_than_days=30" }); }}>Prune 30d+</button>
       </div>
-      {isLoading ? <Spinner /> : logs.length === 0 ? <EmptyState title="No logs" /> : (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : logs.length === 0 ? <EmptyState title="No logs" /> : (
         <Card className="!p-2 font-mono text-xs">
           {logs.map((l) => (
             <div key={l.id} className="flex gap-2 border-b border-zinc-100 px-2 py-1.5 last:border-0 dark:border-zinc-800">

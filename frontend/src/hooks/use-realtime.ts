@@ -37,10 +37,15 @@ export function useRealtimeFeed(enabled: boolean) {
       const token = localStorage.getItem("access_token");
       if (!token) return;
       try {
-        ws = new WebSocket(`${wsBase()}/ws?token=${encodeURIComponent(token)}`);
+        // Token travels as the first WS message, never in the URL (URLs land
+        // in server/proxy access logs; message frames don't).
+        ws = new WebSocket(`${wsBase()}/ws`);
       } catch {
         return;
       }
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ token }));
+      };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);

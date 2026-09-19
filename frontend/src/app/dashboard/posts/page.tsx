@@ -1,13 +1,13 @@
 "use client";
 import { useState } from "react";
-import { Card, EmptyState, Spinner, StatusBadge } from "@/components/ui";
+import { Card, EmptyState, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, usePosts, useQueue } from "@/hooks/use-api";
 import { fmt, timeAgo } from "@/lib/utils";
 import type { Post } from "@/types/models";
 
 export default function PostsPage() {
   const [status, setStatus] = useState("");
-  const { data, isLoading } = usePosts(status);
+  const { data, isLoading, isError, refetch } = usePosts(status);
   const { data: queue } = useQueue();
   const retry = useApiMutation("post", [["posts"]]);
   const remove = useApiMutation("delete", [["posts"]]);
@@ -35,7 +35,7 @@ export default function PostsPage() {
         {(queue ?? []).length === 0 && <p className="text-sm text-zinc-500">Nothing scheduled.</p>}
       </Card>
 
-      {isLoading ? <Spinner /> : posts.length === 0 ? (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : posts.length === 0 ? (
         <EmptyState title="No posts" hint="Schedule rules create posts automatically every minute." />
       ) : (
         <Card>

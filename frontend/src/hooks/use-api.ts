@@ -32,11 +32,13 @@ function errorMessage(err: unknown): string {
   return typeof detail === "string" ? detail : "Request failed";
 }
 
+// Polling is the fallback — the WS feed invalidates these keys on every
+// event, so intervals stay generous to avoid double-fetch traffic.
 export function useOverview(days = 30) {
-  return useQuery({ queryKey: ["overview", days], queryFn: () => get(`/analytics/overview?days=${days}`), refetchInterval: 15000 });
+  return useQuery({ queryKey: ["overview", days], queryFn: () => get(`/analytics/overview?days=${days}`), refetchInterval: 60000 });
 }
 export function useAccounts() {
-  return useQuery({ queryKey: ["accounts"], queryFn: () => get("/accounts"), refetchInterval: 15000 });
+  return useQuery({ queryKey: ["accounts"], queryFn: () => get("/accounts"), refetchInterval: 60000 });
 }
 
 /** Videos list: poll only while something is uploaded/processing —
@@ -56,11 +58,11 @@ export function usePosts(status = "") {
   return useQuery({
     queryKey: ["posts", status],
     queryFn: () => get(status ? `/posts?status=${status}` : "/posts"),
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   });
 }
 export function useQueue() {
-  return useQuery({ queryKey: ["queue"], queryFn: () => get("/posts/queue"), refetchInterval: 10000 });
+  return useQuery({ queryKey: ["queue"], queryFn: () => get("/posts/queue"), refetchInterval: 30000 });
 }
 export function useRules() {
   return useQuery({ queryKey: ["rules"], queryFn: () => get("/schedule") });
@@ -87,7 +89,7 @@ export function useAudioStats() {
   return useQuery({ queryKey: ["audio-stats"], queryFn: () => get("/analytics/audio") });
 }
 export function useLogs() {
-  return useQuery({ queryKey: ["logs"], queryFn: () => get("/logs?limit=200"), refetchInterval: 8000 });
+  return useQuery({ queryKey: ["logs"], queryFn: () => get("/logs?limit=200"), refetchInterval: 30000 });
 }
 export function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => get("/settings") });

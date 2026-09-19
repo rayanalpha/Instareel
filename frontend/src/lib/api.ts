@@ -21,7 +21,25 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-let refreshing = false;
+// Single-flight refresh: concurrent 401s queue behind one refresh call
+// instead of racing (old boolean flag dropped all but the first request).
+let refreshPromise: Promise<string> | null = null;
+
+function doRefresh(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refresh = localStorage.getItem("refresh_token");
+      if (!refresh) throw new Error("no refresh token");
+      const { data } = await axios.post(`${baseURL}/api/v1/auth/refresh`, { refresh_token: refresh });
+      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem("refresh_token", data.refresh_token);
+      return data.access_token as string;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
 
 api.interceptors.response.use(
   (res) => res,
@@ -29,22 +47,14 @@ api.interceptors.response.use(
     const original = error.config;
     if (error.response?.status === 401 && !original._retried && typeof window !== "undefined") {
       original._retried = true;
-      const refresh = localStorage.getItem("refresh_token");
-      if (refresh && !refreshing) {
-        refreshing = true;
-        try {
-          const { data } = await axios.post(`${baseURL}/api/v1/auth/refresh`, { refresh_token: refresh });
-          localStorage.setItem("access_token", data.access_token);
-          localStorage.setItem("refresh_token", data.refresh_token);
-          original.headers.Authorization = `Bearer ${data.access_token}`;
-          return api(original);
-        } catch {
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-          window.location.href = "/login";
-        } finally {
-          refreshing = false;
-        }
+      try {
+        const token = await doRefresh();
+        original.headers.Authorization = `Bearer ${token}`;
+        return api(original);
+      } catch {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        window.location.href = "/login";
       }
     }
     return Promise.reject(error);
@@ -53,10 +63,4 @@ api.interceptors.response.use(
 
 export function apiBase(): string {
   return baseURL;
-}
-
-export function authHeaders() {
-  if (typeof window === "undefined") return {};
-  const token = localStorage.getItem("access_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }

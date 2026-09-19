@@ -2,14 +2,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { Card, EmptyState, Spinner, StatusBadge } from "@/components/ui";
+import { Card, EmptyState, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, useVideos } from "@/hooks/use-api";
 import { timeAgo } from "@/lib/utils";
 import type { Video } from "@/types/models";
 
 export default function VideosPage() {
   const [status, setStatus] = useState("");
-  const { data, isLoading } = useVideos(status);
+  const { data, isLoading, isError, refetch } = useVideos(status);
   const del = useApiMutation("delete", [[ "videos" ]]);
   const process = useApiMutation("post", [["videos"]]);
   const videos = (data ?? []) as Video[];
@@ -28,7 +28,7 @@ export default function VideosPage() {
           <Link href="/dashboard/videos/upload" className="btn-primary"><Plus className="h-4 w-4" /> Upload</Link>
         </div>
       </div>
-      {isLoading ? <Spinner /> : videos.length === 0 ? (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : videos.length === 0 ? (
         <EmptyState title="No videos" hint="Upload your first video to start the funnel." />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

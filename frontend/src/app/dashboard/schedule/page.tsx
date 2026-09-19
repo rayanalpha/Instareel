@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { Fragment, useState } from "react";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useAccounts, useApiMutation, useCaptions, useEffects, useRules } from "@/hooks/use-api";
 import { dayLabel } from "@/lib/utils";
 import type { Account, Caption, Effect, ScheduleRule } from "@/types/models";
@@ -8,12 +8,11 @@ import type { Account, Caption, Effect, ScheduleRule } from "@/types/models";
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 export default function SchedulePage() {
-  const { data: rules, isLoading } = useRules();
+  const { data: rules, isLoading, isError, refetch } = useRules();
   const { data: accounts } = useAccounts();
   const { data: captions } = useCaptions();
   const { data: effects } = useEffects();
   const create = useApiMutation("post", [["rules"]]);
-  const update = useApiMutation("put", [["rules"]]);
   const remove = useApiMutation("delete", [["rules"]]);
   const toggle = useApiMutation("post", [["rules"]]);
   const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "" });
@@ -43,8 +42,8 @@ export default function SchedulePage() {
           <div />
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <div key={d} className="font-semibold text-zinc-500">{d}</div>)}
           {HOURS.filter((h) => list.some((r) => r.hour === h)).map((h) => (
-            <>
-              <div key={`h-${h}`} className="pr-1 text-right text-zinc-400">{h}:00</div>
+            <Fragment key={`row-${h}`}>
+              <div className="pr-1 text-right text-zinc-400">{h}:00</div>
               {[0, 1, 2, 3, 4, 5, 6].map((d) => {
                 const hits = list.filter((r) => r.hour === h && (r.day_of_week === -1 || r.day_of_week === d));
                 return (
@@ -55,7 +54,7 @@ export default function SchedulePage() {
                   </div>
                 );
               })}
-            </>
+            </Fragment>
           ))}
         </div>
         {list.length === 0 && !isLoading && <p className="mt-2 text-sm text-zinc-500">No rules yet — every active hour shows here once added.</p>}
@@ -95,7 +94,7 @@ export default function SchedulePage() {
         </div>
       </Card>
 
-      {isLoading ? <Spinner /> : list.length === 0 ? <EmptyState title="No schedule rules" /> : (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : list.length === 0 ? <EmptyState title="No schedule rules" /> : (
         <Card>
           {list.map((r) => (
             <div key={r.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">

@@ -69,9 +69,13 @@ export default function UploadPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <div
+            role="button"
+            tabIndex={0}
+            aria-label="Choose a video file"
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
             onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); setFile(e.dataTransfer.files?.[0] ?? null); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") document.getElementById("video-file-input")?.click(); }}
             className={`flex flex-col items-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition ${drag ? "border-emerald-500 bg-emerald-500/5" : "border-zinc-300 dark:border-zinc-700"}`}
           >
             <UploadCloud className="h-10 w-10 text-zinc-400" />
@@ -79,7 +83,7 @@ export default function UploadPage() {
             <label className="btn-ghost cursor-pointer">
               Choose file
               <input
-                type="file" className="hidden" accept="video/*"
+                id="video-file-input" type="file" className="hidden" accept="video/*"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </label>

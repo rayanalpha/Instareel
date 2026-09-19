@@ -1,26 +1,36 @@
 "use client";
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Card, CardTitle, Spinner } from "@/components/ui";
+import { Card, CardTitle, QueryFailed, Spinner } from "@/components/ui";
+import { toast } from "@/components/toast";
 import { useAccounts, useOverview } from "@/hooks/use-api";
 import { api } from "@/lib/api";
 import { fmt } from "@/lib/utils";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
-  const { data, isLoading } = useOverview(days);
+  const { data, isLoading, isError, refetch } = useOverview(days);
   const { data: accounts } = useAccounts();
 
   async function exportCsv() {
-    const { data: csv } = await api.get(`/analytics/export`);
-    const blob = new Blob([csv], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "analytics.csv";
-    a.click();
+    let url = "";
+    try {
+      const { data: csv } = await api.get(`/analytics/export`);
+      const blob = new Blob([csv], { type: "text/csv" });
+      url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "analytics.csv";
+      a.click();
+    } catch {
+      toast("error", "CSV export failed");
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+    }
   }
 
-  if (isLoading || !data) return <Spinner />;
+  if (isLoading) return <Spinner />;
+  if (isError || !data) return <QueryFailed onRetry={() => refetch()} />;
 
   return (
     <div className="space-y-4">

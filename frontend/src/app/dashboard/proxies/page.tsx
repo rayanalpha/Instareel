@@ -1,11 +1,11 @@
 "use client";
 import { useState } from "react";
-import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, useProxies } from "@/hooks/use-api";
 import type { Proxy } from "@/types/models";
 
 export default function ProxiesPage() {
-  const { data, isLoading } = useProxies();
+  const { data, isLoading, isError, refetch } = useProxies();
   const create = useApiMutation("post", [["proxies"]]);
   const remove = useApiMutation("delete", [["proxies"]]);
   const test = useApiMutation("post", [["proxies"]]);
@@ -33,7 +33,7 @@ export default function ProxiesPage() {
           <div className="flex items-end"><button className="btn-primary w-full" disabled={!form.url} onClick={() => { create.mutate({ url: "/proxies", body: { ...form, username: form.username || null, password: form.password || null, country: form.country || null } }); setForm({ url: "", protocol: "http", username: "", password: "", country: "" }); }}>Add</button></div>
         </div>
       </Card>
-      {isLoading ? <Spinner /> : proxies.length === 0 ? <EmptyState title="No proxies" hint="Assign one proxy per IG account for best deliverability." /> : (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : proxies.length === 0 ? <EmptyState title="No proxies" hint="Assign one proxy per IG account for best deliverability." /> : (
         <Card>
           {proxies.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">

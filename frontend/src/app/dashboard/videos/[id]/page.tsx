@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { Card, CardTitle, Field, Spinner, StatusBadge } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
 import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
 
@@ -27,8 +27,10 @@ export default function VideoDetailPage() {
   const save = useApiMutation("put", [["videos"]]);
   const process = useApiMutation("post", [["videos"]]);
 
+  const [loadError, setLoadError] = useState("");
   async function load() {
     const { data } = await api.get(`/videos/${id}`);
+    setLoadError("");
     setVideo(data);
     setForm({
       effect_preset: data.effect_preset ?? "",
@@ -44,25 +46,39 @@ export default function VideoDetailPage() {
     return data as Detail;
   }
 
-  // Poll only while the video is in a transitional state.
+  // Poll only while the video is in a transitional state; stop on error.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
     (async () => {
-      const v = await load();
-      if (!cancelled && !DONE_STATES.has(v.status)) {
-        timer = setInterval(async () => {
-          const cur = await load();
-          if (DONE_STATES.has(cur.status) && timer) {
-            clearInterval(timer);
-            timer = null;
-          }
-        }, 4000);
+      try {
+        const v = await load();
+        if (!cancelled && !DONE_STATES.has(v.status)) {
+          timer = setInterval(async () => {
+            try {
+              const cur = await load();
+              if (DONE_STATES.has(cur.status)) stop();
+            } catch {
+              if (!cancelled) {
+                setLoadError("Failed to load video — retrying stopped.");
+                stop();
+              }
+            }
+          }, 4000);
+        }
+      } catch {
+        if (!cancelled) setLoadError("Failed to load video.");
       }
     })();
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop();
     };
     /* eslint-disable-next-line */
   }, [id]);
@@ -97,6 +113,7 @@ export default function VideoDetailPage() {
     };
   }, [id, video?.status]);
 
+  if (loadError) return <EmptyState title="Load failed" hint={loadError} />;
   if (!video) return <Spinner />;
 
   return (

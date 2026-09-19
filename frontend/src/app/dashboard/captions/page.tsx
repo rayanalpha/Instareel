@@ -1,13 +1,13 @@
 "use client";
 import { useState } from "react";
-import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useCaptions, useHashtags } from "@/hooks/use-api";
 import type { Caption, HashtagSet } from "@/types/models";
 
 export default function CaptionsPage() {
   const [tab, setTab] = useState<"captions" | "hashtags">("captions");
-  const { data: caps, isLoading: l1 } = useCaptions();
-  const { data: tags, isLoading: l2 } = useHashtags();
+  const { data: caps, isLoading: l1, isError: e1, refetch: r1 } = useCaptions();
+  const { data: tags, isLoading: l2, isError: e2, refetch: r2 } = useHashtags();
   const createCap = useApiMutation("post", [["captions"]]);
   const delCap = useApiMutation("delete", [["captions"]]);
   const createTag = useApiMutation("post", [["hashtags"]]);
@@ -37,7 +37,7 @@ export default function CaptionsPage() {
             </div>
             <div className="mt-3"><Field label="Content (emoji + line breaks supported)"><textarea className="input" rows={3} value={cap.content} onChange={(e) => setCap({ ...cap, content: e.target.value })} /></Field></div>
           </Card>
-          {l1 ? <Spinner /> : ((caps ?? []) as Caption[]).length === 0 ? <EmptyState title="No captions" /> : (
+          {l1 ? <Spinner /> : e1 ? <QueryFailed onRetry={() => r1()} /> : ((caps ?? []) as Caption[]).length === 0 ? <EmptyState title="No captions" /> : (
             <div className="grid gap-4 md:grid-cols-2">
               {((caps ?? []) as Caption[]).map((c) => (
                 <Card key={c.id}>
@@ -69,7 +69,7 @@ export default function CaptionsPage() {
               <div className="flex items-end"><button className="btn-primary w-full" disabled={!tag.name || !tag.tags} onClick={() => { createTag.mutate({ url: "/hashtags", body: tag }); setTag({ name: "", tags: "" }); }}>Add</button></div>
             </div>
           </Card>
-          {l2 ? <Spinner /> : ((tags ?? []) as HashtagSet[]).length === 0 ? <EmptyState title="No hashtag sets" /> : (
+          {l2 ? <Spinner /> : e2 ? <QueryFailed onRetry={() => r2()} /> : ((tags ?? []) as HashtagSet[]).length === 0 ? <EmptyState title="No hashtag sets" /> : (
             <div className="grid gap-4 md:grid-cols-2">
               {((tags ?? []) as HashtagSet[]).map((h) => (
                 <Card key={h.id}>

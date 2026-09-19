@@ -42,6 +42,17 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+/** Query failure state with retry — use on every list page (isError branch). */
+export function QueryFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="card flex flex-col items-center gap-2 p-10 text-center">
+      <p className="font-semibold">Load failed</p>
+      <p className="text-sm text-zinc-500">The request failed. Check the backend connection.</p>
+      <button className="btn-ghost !px-3 !py-1 text-xs" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
+
 export function Spinner() {
   return (
     <div className="flex items-center justify-center p-10">

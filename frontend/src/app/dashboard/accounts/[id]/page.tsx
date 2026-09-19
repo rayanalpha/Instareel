@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { Card, CardTitle, Field, Spinner, StatusBadge } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useApiMutation } from "@/hooks/use-api";
 import { fmt, timeAgo } from "@/lib/utils";
@@ -14,18 +14,24 @@ export default function AccountDetailPage() {
   const [stats, setStats] = useState<any>(null);
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const action = useApiMutation("post", [["accounts"]]);
   const update = useApiMutation("put", [["accounts"]]);
 
   async function load() {
-    const [{ data: a }, { data: s }, { data: p }] = await Promise.all([
-      api.get(`/accounts/${id}`),
-      api.get(`/accounts/${id}/analytics`),
-      api.get("/proxies"),
-    ]);
-    setAcc(a);
-    setStats(s);
-    setProxies(p ?? []);
+    try {
+      const [{ data: a }, { data: s }, { data: p }] = await Promise.all([
+        api.get(`/accounts/${id}`),
+        api.get(`/accounts/${id}/analytics`),
+        api.get("/proxies"),
+      ]);
+      setLoadError("");
+      setAcc(a);
+      setStats(s);
+      setProxies(p ?? []);
+    } catch {
+      setLoadError("Failed to load account.");
+    }
   }
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -49,6 +55,7 @@ export default function AccountDetailPage() {
     }
   }
 
+  if (loadError) return <EmptyState title="Load failed" hint={loadError} />;
   if (!acc) return <Spinner />;
 
   return (

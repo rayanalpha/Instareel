@@ -3,24 +3,22 @@ import { create } from "zustand";
 
 interface AuthState {
   username: string | null;
-  ready: boolean;
   setAuth: (username: string | null) => void;
   logout: () => void;
 }
 
 export const useAuth = create<AuthState>((set) => ({
   username: typeof window !== "undefined" ? localStorage.getItem("username") : null,
-  ready: false,
   setAuth: (username) => {
     if (username) localStorage.setItem("username", username);
     else localStorage.removeItem("username");
-    set({ username, ready: true });
+    set({ username });
   },
   logout: () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("username");
-    set({ username: null, ready: true });
+    set({ username: null });
     window.location.href = "/login";
   },
 }));

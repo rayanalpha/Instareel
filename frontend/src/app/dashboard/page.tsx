@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Clapperboard, Eye, Heart, Radio, Users } from "lucide-react";
-import { Card, CardTitle, EmptyState, Spinner, StatusBadge } from "@/components/ui";
+import { Card, CardTitle, EmptyState, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useAccounts, useOverview, usePosts, useQueue } from "@/hooks/use-api";
 import { fmt, timeAgo } from "@/lib/utils";
 import type { Account, Overview, Post } from "@/types/models";
@@ -22,12 +22,13 @@ function Kpi({ icon: Icon, label, value, sub }: { icon: typeof Eye; label: strin
 }
 
 export default function DashboardPage() {
-  const { data: overview, isLoading } = useOverview(30);
+  const { data: overview, isLoading, isError, refetch } = useOverview(30);
   const { data: accounts } = useAccounts();
   const { data: posts } = usePosts();
   const { data: queue } = useQueue();
 
-  if (isLoading || !overview) return <Spinner />;
+  if (isLoading) return <Spinner />;
+  if (isError || !overview) return <QueryFailed onRetry={() => refetch()} />;
   const ov = overview as Overview;
   const recent = ((posts ?? []) as Post[]).slice(0, 10);
 

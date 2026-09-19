@@ -1,10 +1,10 @@
 "use client";
-import { Card, CardTitle, Spinner } from "@/components/ui";
+import { Card, CardTitle, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useSettings } from "@/hooks/use-api";
 import type { Setting } from "@/types/models";
 
 export default function SettingsPage() {
-  const { data, isLoading } = useSettings();
+  const { data, isLoading, isError, refetch } = useSettings();
   const save = useApiMutation("put", [["settings"]]);
   const testIg = useApiMutation("post", []);
   const settings = (data ?? []) as Setting[];
@@ -16,7 +16,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-xl font-extrabold tracking-tight">Global settings</h1>
-      {isLoading ? <Spinner /> : Object.entries(groups).map(([cat, items]) => (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : Object.entries(groups).map(([cat, items]) => (
         <Card key={cat}>
           <CardTitle>{cat}</CardTitle>
           {items.map((s) => (

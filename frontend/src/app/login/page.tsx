@@ -40,12 +40,12 @@ export default function LoginPage() {
         </div>
         <p className="text-sm text-zinc-500">Sign in to the admin dashboard.</p>
         <div>
-          <span className="label">Username</span>
-          <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+          <label className="label" htmlFor="login-username">Username</label>
+          <input id="login-username" className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
         </div>
         <div>
-          <span className="label">Password</span>
-          <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          <label className="label" htmlFor="login-password">Password</label>
+          <input id="login-password" className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
         <button className="btn-primary w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>

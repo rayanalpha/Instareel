@@ -2,14 +2,14 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { Card, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
+import { Card, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useAccounts, useApiMutation, useProxies } from "@/hooks/use-api";
 import { timeAgo } from "@/lib/utils";
 import type { Account, Proxy } from "@/types/models";
 
 export default function AccountsPage() {
-  const { data, isLoading } = useAccounts();
+  const { data, isLoading, isError, refetch } = useAccounts();
   const { data: proxies } = useProxies();
   const create = useApiMutation("post", [["accounts"]]);
   const remove = useApiMutation("delete", [["accounts"]]);
@@ -75,7 +75,7 @@ export default function AccountsPage() {
           </div>
         </div>
       </Card>
-      {isLoading ? <Spinner /> : accounts.length === 0 ? (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : accounts.length === 0 ? (
         <EmptyState title="No accounts" hint="Add your first Instagram account above." />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -115,7 +115,7 @@ export default function AccountsPage() {
                     disabled={update.isPending}
                     onChange={(e) => {
                       const v = e.target.value;
-                      update.mutate({ url: `/accounts/${a.id}`, body: { proxy_id: v === "" ? "none" as unknown as number : Number(v) } });
+                      update.mutate({ url: `/accounts/${a.id}`, body: { proxy_id: v === "" ? "none" : Number(v) } });
                     }}
                   >
                     <option value="">No proxy</option>

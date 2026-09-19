@@ -1,11 +1,11 @@
 "use client";
 import { useState } from "react";
-import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useEffects } from "@/hooks/use-api";
 import type { Effect } from "@/types/models";
 
 export default function EffectsPage() {
-  const { data, isLoading } = useEffects();
+  const { data, isLoading, isError, refetch } = useEffects();
   const create = useApiMutation("post", [["effects"]]);
   const remove = useApiMutation("delete", [["effects"]]);
   const [form, setForm] = useState({ name: "", description: "", ffmpeg_filter: "" });
@@ -23,7 +23,7 @@ export default function EffectsPage() {
         </div>
         <div className="mt-3"><Field label="FFmpeg video filter (applied after crop/scale)"><input className="input font-mono text-xs" value={form.ffmpeg_filter} onChange={(e) => setForm({ ...form, ffmpeg_filter: e.target.value })} placeholder="eq=saturation=1.2:contrast=1.05,unsharp=5:5:0.5" /></Field></div>
       </Card>
-      {isLoading ? <Spinner /> : effects.length === 0 ? <EmptyState title="No presets" hint="Reload to seed the built-in professional presets, or add your own FFmpeg filters." /> : (
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : effects.length === 0 ? <EmptyState title="No presets" hint="Reload to seed the built-in professional presets, or add your own FFmpeg filters." /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {effects.map((e) => (
             <Card key={e.id}>

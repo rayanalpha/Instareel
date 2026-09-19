@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardTitle, EmptyState, Field, Spinner } from "@/components/ui";
+import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useAccounts, useApiMutation, useBios } from "@/hooks/use-api";
 import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
@@ -11,7 +11,7 @@ type Privacy = "" | "private" | "public";
 
 export default function BiosPage() {
   const qc = useQueryClient();
-  const { data, isLoading } = useBios();
+  const { data, isLoading, isError, refetch } = useBios();
   const { data: accounts } = useAccounts();
   const create = useApiMutation("post", [["bios"]]);
   const remove = useApiMutation("delete", [["bios"]]);
@@ -19,6 +19,7 @@ export default function BiosPage() {
   const [form, setForm] = useState({ account_id: "", text: "", link_url: "", full_name: "", privacy: "" as Privacy, rotation_interval_days: 14 });
   const [current, setCurrent] = useState<Record<number, IgProfile | null>>({});
   const [loadingCurrent, setLoadingCurrent] = useState<number | null>(null);
+  const [picError, setPicError] = useState("");
   const bios = (data ?? []) as Bio[];
 
   function privacyBody(p: Privacy) {
@@ -39,13 +40,19 @@ export default function BiosPage() {
 
   async function uploadPicture(id: number, file: File | null) {
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    await api.post(`/bios/${id}/picture`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-      timeout: 120000,
-    });
-    qc.invalidateQueries({ queryKey: ["bios"] });
+    setPicError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await api.post(`/bios/${id}/picture`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      qc.invalidateQueries({ queryKey: ["bios"] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Picture upload failed";
+      setPicError(String(msg));
+    }
   }
 
   return (
@@ -82,7 +89,8 @@ export default function BiosPage() {
           </div>
         </div>
       </Card>
-      {isLoading ? <Spinner /> : bios.length === 0 ? <EmptyState title="No profile configs" /> : (
+      {picError && <p className="text-sm text-red-500">{picError}</p>}
+      {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : bios.length === 0 ? <EmptyState title="No profile configs" /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {bios.map((b) => (
             <Card key={b.id}>
