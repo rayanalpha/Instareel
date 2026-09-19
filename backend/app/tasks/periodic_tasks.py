@@ -128,15 +128,18 @@ def check_bio_rotation():
         with SyncSessionLocal() as s:
             bios = s.execute(select(BioConfig).where(BioConfig.is_active.is_(True))).scalars().all()
             due = [b for b in bios if not b.last_applied or (now - b.last_applied).days >= b.rotation_interval_days]
-            items = [(b.id, b.account_id, b.text, b.link_url) for b in due]
+            items = [
+                (b.id, b.account_id, b.text, b.link_url, b.full_name, b.profile_pic_path, b.make_private)
+                for b in due
+            ]
         applied = 0
-        for bid, acc_id, text, link in items:
+        for bid, acc_id, text, link, full_name, pic, private in items:
             try:
                 with SyncSessionLocal() as s:
                     acc = s.get(Account, acc_id)
                     if not acc:
                         continue
-                    if sched.account_age_days(acc.created_at) < sched.ANALYTICS_MIN_AGE_DAYS:
+                    if sched.account_age_days(acc.created_at) < sched.BIO_MIN_AGE_DAYS:
                         continue
                     if not sched.account_reachable(s, acc):
                         continue
@@ -148,7 +151,10 @@ def check_bio_rotation():
                 svc = InstagramService(
                     proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT)
                 )
-                err = svc.apply_bio(username, password, text, link or "")
+                err = svc.apply_profile(
+                    username, password, biography=text, external_url=link or "",
+                    full_name=full_name or "", make_private=private, picture_path=pic,
+                )
                 if not err:
                     with SyncSessionLocal() as s:
                         b = s.get(BioConfig, bid)

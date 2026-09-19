@@ -54,6 +54,11 @@ class BioConfig(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_applied: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotation_interval_days: Mapped[int] = mapped_column(Integer, default=14)
+    # Extended profile customization (all optional — empty/None = don't touch):
+    full_name: Mapped[str] = mapped_column(String(128), default="")
+    profile_pic_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Tri-state privacy: None = leave as-is, True = force private, False = force public.
+    make_private: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     account: Mapped["Account"] = relationship(back_populates="bio_configs")
 

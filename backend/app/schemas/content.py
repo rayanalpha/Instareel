@@ -47,12 +47,16 @@ class BioIn(BaseModel):
     account_id: int
     text: str = Field(min_length=1)
     link_url: str = ""
+    full_name: str = Field(default="", max_length=128)
+    make_private: bool | None = None
     is_active: bool = True
     rotation_interval_days: int = Field(default=14, ge=1, le=365)
 
 
 class BioOut(BioIn):
     id: int
+    profile_pic_path: str | None = None
+    has_picture: bool = False
     last_applied: dt.datetime | None
 
 

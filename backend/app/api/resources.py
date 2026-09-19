@@ -33,12 +33,25 @@ def _audio_out(t: AudioTrack) -> AudioOut:
     )
 
 
-# ---- Bios ----
+# ---- Bios (bio text + link + full name + picture + privacy) ----
+
+def _bio_out(b: BioConfig) -> BioOut:
+    import os as _os
+
+    return BioOut(
+        id=b.id, account_id=b.account_id, text=b.text, link_url=b.link_url,
+        full_name=b.full_name or "", make_private=b.make_private,
+        is_active=b.is_active, rotation_interval_days=b.rotation_interval_days,
+        profile_pic_path=b.profile_pic_path,
+        has_picture=bool(b.profile_pic_path and _os.path.exists(b.profile_pic_path)),
+        last_applied=b.last_applied,
+    )
+
 
 @bio_router.get("", response_model=list[BioOut])
 async def list_bios(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(BioConfig))).scalars().all()
-    return [BioOut(id=b.id, account_id=b.account_id, text=b.text, link_url=b.link_url, is_active=b.is_active, rotation_interval_days=b.rotation_interval_days, last_applied=b.last_applied) for b in rows]
+    return [_bio_out(b) for b in rows]
 
 
 @bio_router.post("", response_model=BioOut, status_code=201)
@@ -50,7 +63,7 @@ async def create_bio(body: BioIn, _: str = Depends(get_current_admin), db: Async
     db.add(b)
     await db.commit()
     await db.refresh(b)
-    return BioOut(id=b.id, account_id=b.account_id, text=b.text, link_url=b.link_url, is_active=b.is_active, rotation_interval_days=b.rotation_interval_days, last_applied=b.last_applied)
+    return _bio_out(b)
 
 
 @bio_router.put("/{bid}", response_model=BioOut)
@@ -62,7 +75,7 @@ async def update_bio(bid: int, body: BioIn, _: str = Depends(get_current_admin),
         setattr(b, k, v)
     await db.commit()
     await db.refresh(b)
-    return BioOut(id=b.id, account_id=b.account_id, text=b.text, link_url=b.link_url, is_active=b.is_active, rotation_interval_days=b.rotation_interval_days, last_applied=b.last_applied)
+    return _bio_out(b)
 
 
 @bio_router.delete("/{bid}", status_code=204)
@@ -77,6 +90,7 @@ async def delete_bio(bid: int, _: str = Depends(get_current_admin), db: AsyncSes
 
 @bio_router.post("/{bid}/apply")
 async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
+    """Apply the full profile now: bio + link + full name + picture + privacy."""
     import concurrent.futures
 
     from app.config import settings
@@ -84,27 +98,150 @@ async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
     from app.utils.instagram_helpers import session_path_for
 
     async with SessionLocal() as db:
+        from app.tasks import sync_helpers as sched
+
         b = await db.get(BioConfig, bid)
         if not b:
             raise HTTPException(404, "Bio not found")
         acc = await db.get(Account, b.account_id)
         if not acc:
             raise HTTPException(404, "Account not found")
-        username, password, text, link = acc.username, decrypt_secret(acc.password_enc), b.text, b.link_url
+        if not sched.account_reachable(db, acc):
+            raise HTTPException(409, "No healthy proxy route for this account right now")
+        username, password = acc.username, decrypt_secret(acc.password_enc)
+        purl = sched.resolve_proxy_url(db, acc)
+        bio_text: str = b.text
+        link: str = b.link_url or ""
+        full_name: str = b.full_name or ""
+        make_private: bool | None = b.make_private
+        picture: str | None = b.profile_pic_path
+        acc_id = acc.id
+    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         err = pool.submit(
-            InstagramService(session_path=session_path_for(username, settings.MEDIA_ROOT)).apply_bio,
-            username, password, text, link or "",
+            svc.apply_profile, username, password,
+            biography=bio_text, external_url=link, full_name=full_name,
+            make_private=make_private, picture_path=picture,
         ).result(timeout=180)
     if err:
-        raise HTTPException(502, f"Bio apply failed: {err}")
+        raise HTTPException(502, f"Profile apply failed: {err}")
     async with SessionLocal() as db:
         b = await db.get(BioConfig, bid)
         if b:
             b.last_applied = dt.datetime.now(dt.timezone.utc)
             await db.commit()
-    await log_event("INFO", "account", f"Bio force-applied to account {acc.id if 'acc' in dir() else ''}")
+    await log_event("INFO", "account", f"Profile force-applied to account {acc_id}")
     return {"ok": True}
+
+
+PIC_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+MAX_PIC_BYTES = 10 * 1024 * 1024
+
+
+@bio_router.post("/{bid}/picture", response_model=BioOut)
+async def upload_bio_picture(
+    bid: int,
+    file: UploadFile = File(...),
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload the profile picture for a bio config (validated image, ≤10MB).
+
+    Stored under media/profile_pics/ and applied on next rotation/Apply.
+    """
+    from app.config import settings
+    from app.services.video_processor import media_dirs
+
+    b = await db.get(BioConfig, bid)
+    if not b:
+        raise HTTPException(404, "Bio not found")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in PIC_EXT:
+        raise HTTPException(400, f"Unsupported image type {ext}. Allowed: {sorted(PIC_EXT)}")
+    raw = await file.read()
+    try:
+        await file.close()
+    except Exception:
+        pass
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    if len(raw) > MAX_PIC_BYTES:
+        raise HTTPException(413, "Image exceeds 10MB")
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(__import__("io").BytesIO(raw)) as img:
+            img.load()
+            if img.width < 50 or img.height < 50:
+                raise HTTPException(422, "Image too small (min 50×50)")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(422, "File is not a valid image")
+    dirs = media_dirs()
+    tmp_name = f"bio_{bid}_{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(dirs["profile_pics"], tmp_name)
+    old = b.profile_pic_path
+    with open(dest, "wb") as f:
+        f.write(raw)
+    b.profile_pic_path = dest
+    await db.commit()
+    await db.refresh(b)
+    try:
+        if old and old != dest and os.path.exists(old):
+            os.remove(old)
+    except OSError:
+        pass
+    await log_event("INFO", "account", f"Profile picture uploaded for bio #{bid}")
+    return _bio_out(b)
+
+
+@bio_router.delete("/{bid}/picture", response_model=BioOut)
+async def delete_bio_picture(bid: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    b = await db.get(BioConfig, bid)
+    if not b:
+        raise HTTPException(404, "Bio not found")
+    old = b.profile_pic_path
+    b.profile_pic_path = None
+    await db.commit()
+    await db.refresh(b)
+    try:
+        if old and os.path.exists(old):
+            os.remove(old)
+    except OSError:
+        pass
+    return _bio_out(b)
+
+
+@bio_router.get("/{bid}/current")
+async def bio_current(bid: int, _: str = Depends(get_current_admin)):
+    """Read-only IG-side profile snapshot to compare against the config."""
+    import concurrent.futures
+
+    from app.config import settings
+    from app.services.instagram_service import InstagramService
+    from app.utils.instagram_helpers import session_path_for
+
+    async with SessionLocal() as db:
+        from app.tasks import sync_helpers as sched
+
+        b = await db.get(BioConfig, bid)
+        if not b:
+            raise HTTPException(404, "Bio not found")
+        acc = await db.get(Account, b.account_id)
+        if not acc:
+            raise HTTPException(404, "Account not found")
+        username = acc.username
+        purl = sched.resolve_proxy_url(db, acc)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            data = pool.submit(
+                InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT)).read_profile,
+                username,
+            ).result(timeout=120)
+        except Exception as exc:
+            raise HTTPException(502, f"Profile read failed: {exc}")
+    return data
 
 
 @bio_router.get("/{bid}/history")

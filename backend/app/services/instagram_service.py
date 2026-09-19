@@ -138,13 +138,59 @@ class InstagramService:
             return None, None, f"{kind}: {exc}"
 
     def apply_bio(self, username: str, password: str, biography: str, external_url: str) -> str:
+        """Legacy bio-only entry — delegates to apply_profile (one code path)."""
+        return self.apply_profile(username, password, biography=biography, external_url=external_url)
+
+    def apply_profile(
+        self,
+        username: str,
+        password: str,
+        biography: str = "",
+        external_url: str = "",
+        full_name: str = "",
+        make_private: "bool | None" = None,
+        picture_path: "str | None" = None,
+    ) -> str:
+        """Apply profile fields in one session. Returns "" or "kind: error".
+
+        Only non-empty fields are sent (empty = don't touch). A missing
+        picture file fails upfront, before anything reaches Instagram.
+        Username/email/phone changes are deliberately unsupported (they
+        desync our session files and need human confirmation flows).
+        """
+        import os
+
+        if picture_path and not os.path.exists(picture_path):
+            return f"picture: file not found ({picture_path})"
         cl = self._make_client(username)
         try:
             ok, _ = _feed_with_retry(cl)
             if not ok:
                 cl.login(username, password)
-            cl.account_edit(biography=biography, external_url=external_url or "")
-            if self.session_path:
+                if self.session_path:
+                    try:
+                        cl.dump_settings(self.session_path)
+                    except Exception:
+                        pass
+            edit: dict = {}
+            if (biography or "").strip():
+                edit["biography"] = biography
+            if (external_url or "").strip():
+                edit["external_url"] = external_url
+            if (full_name or "").strip():
+                edit["full_name"] = full_name.strip()[:64]
+            if edit:
+                cl.account_edit(**edit)
+            if picture_path:
+                from pathlib import Path
+
+                cl.account_change_picture(Path(picture_path))
+            if make_private is not None:
+                if make_private:
+                    cl.account_set_private()
+                else:
+                    cl.account_set_public()
+            if self.session_path and (edit or picture_path or make_private is not None):
                 try:
                     cl.dump_settings(self.session_path)
                 except Exception:
@@ -152,6 +198,28 @@ class InstagramService:
             return ""
         except Exception as exc:
             return f"{_classify(exc)}: {exc}"
+
+    def read_profile(self, username: str) -> dict:
+        """Read-only IG-side profile snapshot (bio/full name/url/privacy/pic).
+
+        Raises on failure — callers turn it into a 502 with the reason.
+        """
+        cl = self._make_client(username)
+        ok, kind = _feed_with_retry(cl)
+        if not ok:
+            raise RuntimeError(f"session invalid ({kind}) — refresh the session first")
+        info = cl.account_info().dict()
+        return {
+            "username": info.get("username"),
+            "full_name": info.get("full_name") or "",
+            "biography": info.get("biography") or "",
+            "external_url": info.get("external_url") or "",
+            "is_private": bool(info.get("is_private")),
+            "profile_pic_url": info.get("profile_pic_url") or "",
+            "follower_count": info.get("follower_count"),
+            "following_count": info.get("following_count"),
+            "media_count": info.get("media_count"),
+        }
 
     def media_info(self, username: str, media_id: str) -> dict:
         cl = self._make_client(username)

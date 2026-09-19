@@ -623,6 +623,135 @@ class TestEffectiveDuration:
         assert effective_output_duration(20.0, 8.0, 5.0) == 12.0  # end<=start ignored
 
 
+class _FakeIGClient:
+    """Stand-in for instagrapi.Client (no network). Records calls."""
+
+    made: list = []
+
+    def __init__(self):
+        self.calls: list = []
+        self.settings: dict = {}
+        self.fail_feed = 0
+        self.feed_calls = 0
+        _FakeIGClient.made.append(self)
+
+    def set_device(self, d):
+        self.calls.append(("set_device", d))
+
+    def set_proxy(self, u):
+        self.calls.append(("proxy", u))
+
+    def load_settings(self, p):
+        self.calls.append(("load", p))
+
+    def get_timeline_feed(self):
+        self.feed_calls += 1
+        self.calls.append(("feed",))
+        if self.feed_calls <= self.fail_feed:
+            raise TimeoutError("boom")
+        return {"ok": 1}
+
+    def login(self, u, p):
+        self.calls.append(("login", u))
+        return True
+
+    def dump_settings(self, p):
+        self.calls.append(("dump", p))
+
+    def account_edit(self, **kw):
+        self.calls.append(("edit", kw))
+        return True
+
+    def account_change_picture(self, p):
+        self.calls.append(("pic", str(p)))
+        return True
+
+    def account_set_private(self):
+        self.calls.append(("private",))
+        return True
+
+    def account_set_public(self):
+        self.calls.append(("public",))
+        return True
+
+
+class TestApplyProfile:
+    def _svc(self, monkeypatch):
+        import instagrapi
+
+        from app.services.instagram_service import InstagramService
+
+        _FakeIGClient.made.clear()
+        monkeypatch.setattr(instagrapi, "Client", _FakeIGClient)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        return InstagramService()
+
+    def test_full_apply_sends_only_set_fields(self, monkeypatch, tmp_path):
+        pic = tmp_path / "pic.jpg"
+        pic.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+        svc = self._svc(monkeypatch)
+        err = svc.apply_profile(
+            "u", "p", biography="hey", external_url="https://t.me/x",
+            full_name=" Brand ", make_private=True, picture_path=str(pic),
+        )
+        assert err == ""
+        cl = _FakeIGClient.made[-1]
+        kinds = [c[0] for c in cl.calls]
+        assert "login" not in kinds  # healthy session reused
+        edit = next(c[1] for c in cl.calls if c[0] == "edit")
+        assert edit == {"biography": "hey", "external_url": "https://t.me/x", "full_name": "Brand"}
+        assert ("pic", str(pic)) in cl.calls
+        assert ("private",) in cl.calls and ("public",) not in kinds
+
+    def test_empty_apply_is_noop_success(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        assert svc.apply_profile("u", "p") == ""
+        cl = _FakeIGClient.made[-1]
+        kinds = [c[0] for c in cl.calls]
+        assert "feed" in kinds
+        assert not ({"edit", "pic", "private", "public", "login"} & set(kinds))
+
+    def test_missing_picture_fails_before_any_call(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        err = svc.apply_profile("u", "p", biography="x", picture_path="/nope/gone.jpg")
+        assert err.startswith("picture:")
+        assert _FakeIGClient.made == []
+
+    def test_public_path_and_error_passthrough(self, monkeypatch):
+        import instagrapi
+
+        svc = self._svc(monkeypatch)
+        assert svc.apply_profile("u", "p", make_private=False) == ""
+        cl = _FakeIGClient.made[-1]
+        assert ("public",) in [c if isinstance(c, tuple) and len(c) == 1 else c for c in cl.calls]
+
+        class Boom(_FakeIGClient):
+            def account_edit(self, **kw):
+                raise Exception("challenge_required: verify")
+
+        monkeypatch.setattr(instagrapi, "Client", Boom)
+        err = svc.apply_profile("u", "p", biography="x")
+        assert err.startswith("challenge")
+
+    def test_dead_session_falls_back_to_login(self, monkeypatch):
+        import instagrapi
+
+        class Dead(_FakeIGClient):
+            def get_timeline_feed(self):
+                self.calls.append(("feed",))
+                raise Exception("login_required: expired")
+
+        monkeypatch.setattr(instagrapi, "Client", Dead)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+
+        from app.services.instagram_service import InstagramService
+
+        svc = InstagramService()
+        assert svc.apply_profile("u", "p", biography="x") == ""
+        kinds = [c[0] for c in Dead.made[-1].calls]
+        assert "login" in kinds and "edit" in kinds
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

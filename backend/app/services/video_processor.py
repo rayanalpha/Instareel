@@ -23,6 +23,7 @@ def media_dirs() -> dict[str, str]:
         "thumbnails": os.path.join(root, "thumbnails"),
         "watermarks": os.path.join(root, "watermarks"),
         "audio": os.path.join(root, "audio"),
+        "profile_pics": os.path.join(root, "profile_pics"),
     }
     for d in dirs.values():
         os.makedirs(d, exist_ok=True)
