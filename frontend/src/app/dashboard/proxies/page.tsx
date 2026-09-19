@@ -1,17 +1,51 @@
 "use client";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, useProxies } from "@/hooks/use-api";
-import type { Proxy } from "@/types/models";
+import { api } from "@/lib/api";
+import type { Proxy, ProxyImportResult } from "@/types/models";
 
 export default function ProxiesPage() {
+  const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useProxies();
   const create = useApiMutation("post", [["proxies"]]);
   const remove = useApiMutation("delete", [["proxies"]]);
   const test = useApiMutation("post", [["proxies"]]);
   const checkAll = useApiMutation("post", [["proxies"]]);
   const [form, setForm] = useState({ url: "", protocol: "http", username: "", password: "", country: "" });
+  const [impFile, setImpFile] = useState<File | null>(null);
+  const [impProto, setImpProto] = useState("http");
+  const [impCountry, setImpCountry] = useState("");
+  const [impBusy, setImpBusy] = useState(false);
+  const [impResult, setImpResult] = useState<ProxyImportResult | null>(null);
+  const [impError, setImpError] = useState("");
   const proxies = (data ?? []) as Proxy[];
+
+  async function bulkImport() {
+    if (!impFile) return;
+    setImpBusy(true);
+    setImpError("");
+    setImpResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", impFile);
+      fd.append("default_protocol", impProto);
+      fd.append("default_country", impCountry);
+      const { data } = await api.post("/proxies/import", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      setImpResult(data as ProxyImportResult);
+      setImpFile(null);
+      qc.invalidateQueries({ queryKey: ["proxies"] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Import failed";
+      setImpError(String(msg));
+    } finally {
+      setImpBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -33,6 +67,35 @@ export default function ProxiesPage() {
           <div className="flex items-end"><button className="btn-primary w-full" disabled={!form.url} onClick={() => { create.mutate({ url: "/proxies", body: { ...form, username: form.username || null, password: form.password || null, country: form.country || null } }); setForm({ url: "", protocol: "http", username: "", password: "", country: "" }); }}>Add</button></div>
         </div>
       </Card>
+      <Card>
+        <CardTitle>Bulk import (.txt, one per line)</CardTitle>
+        <p className="mb-2 text-xs text-zinc-500">
+          host:port · scheme://host:port · user:pass@host:port · scheme://user:pass@host:port · host:port:user:pass —
+          no-auth (IP-whitelisted) lines work as-is. Optional country tag per line: <code>|DE</code> or <code>#DE</code>.
+          Duplicates are skipped, every bad line is reported.
+        </p>
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="List file">
+            <input type="file" className="input" accept=".txt,text/plain" onChange={(e) => setImpFile(e.target.files?.[0] ?? null)} />
+          </Field>
+          <Field label="Default protocol">
+            <select className="input" value={impProto} onChange={(e) => setImpProto(e.target.value)}>
+              <option value="http">http</option><option value="socks5">socks5</option><option value="socks4">socks4</option>
+            </select>
+          </Field>
+          <Field label="Default country (optional)"><input className="input" value={impCountry} onChange={(e) => setImpCountry(e.target.value)} placeholder="DE" maxLength={2} /></Field>
+          <div className="flex items-end"><button className="btn-primary w-full" disabled={!impFile || impBusy} onClick={bulkImport}>{impBusy ? "Importing…" : "Import"}</button></div>
+        </div>
+        {impError && <p className="mt-2 text-sm text-red-500">{impError}</p>}
+        {impResult && (
+          <div className="mt-2 text-xs">
+            <p className="text-emerald-600">Added {impResult.added} · {impResult.duplicates_skipped} duplicates skipped · {impResult.errors.filter((e) => e.reason !== "duplicate").length} bad lines</p>
+            {impResult.errors.slice(0, 10).map((e, i) => (
+              <p key={i} className="text-zinc-500">line {e.line}: {e.reason} — <code>{e.text}</code></p>
+            ))}
+          </div>
+        )}
+      </Card>
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : proxies.length === 0 ? <EmptyState title="No proxies" hint="Assign one proxy per IG account for best deliverability." /> : (
         <Card>
           {proxies.map((p) => (
@@ -40,6 +103,7 @@ export default function ProxiesPage() {
               <span className={`h-2 w-2 rounded-full ${p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} />
               <code className="text-xs">{p.protocol}://{p.url.replace(/^https?:\/\//, "")}</code>
               <span className="text-zinc-500">{p.country ?? ""} · {p.latency_ms != null ? `${p.latency_ms}ms` : "—"} · fails {p.fail_count}</span>
+              {p.last_error && <span className="max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
               <span className="ml-auto flex gap-2">
                 <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => test.mutate({ url: `/proxies/${p.id}/test` })}>Test</button>
                 <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" onClick={() => { if (confirm("Delete proxy?")) remove.mutate({ url: `/proxies/${p.id}` }); }}>Delete</button>

@@ -122,9 +122,10 @@ def throttle_cooldown_hours(retry_count: int) -> int:
 def rank_spare_proxies(candidates: list[dict], prefer_country: str = ""):
     """Pick the best spare proxy (pure — unit tested).
 
-    Each candidate: {"proxy": obj, "load": int, "country": str, "latency": int|None}.
-    Prefers same-country (no sudden geo-hop), then fewest accounts, then lowest latency.
-    Returns the proxy object or None.
+    Each candidate: {"proxy": obj, "load": int, "country": str,
+    "latency": int|None, "fail_count": int}. Sort key, in order:
+    same-country (no sudden geo-hop), fewest recent failures, fewest
+    accounts, lowest latency. Returns the proxy object or None.
     """
     if not candidates:
         return None
@@ -133,13 +134,13 @@ def rank_spare_proxies(candidates: list[dict], prefer_country: str = ""):
     def key(c: dict):
         same = 0 if (want and (c.get("country") or "").upper() == want) else 1
         lat = c.get("latency")
-        return (same, c.get("load", 0), lat if lat is not None else 10**9)
+        return (same, c.get("fail_count", 0), c.get("load", 0), lat if lat is not None else 10**9)
 
     return sorted(candidates, key=key)[0]["proxy"]
 
 
 def pick_spare_proxy(session, exclude_id: "int | None" = None, prefer_country: "str | None" = None):
-    """Healthiest spare proxy from the DB (active + healthy, not exclude_id)."""
+    """Highest-scoring spare proxy (active + healthy, not exclude_id)."""
     from sqlalchemy import func as _func
     from sqlalchemy import select as _select
 
@@ -155,49 +156,101 @@ def pick_spare_proxy(session, exclude_id: "int | None" = None, prefer_country: "
         q = q.where(Proxy.id != exclude_id)
     rows = session.execute(q).all()
     cands = [
-        {"proxy": p, "load": cnt or 0, "country": p.country or "", "latency": p.latency_ms}
+        {"proxy": p, "load": cnt or 0, "country": p.country or "",
+         "latency": p.latency_ms, "fail_count": p.fail_count or 0}
         for p, cnt in rows
     ]
     return rank_spare_proxies(cands, prefer_country or "")
 
 
-def resolve_proxy_url(session, account) -> "str | None":
-    """Connection URL for this post: own proxy if healthy, else best spare.
+def resolve_proxy(session, account):
+    """The Proxy object to route this account through (or None).
 
-    Returns None for direct connection (no proxy assigned) AND when no
-    healthy route exists — use account_reachable() to tell them apart.
+    Own proxy while healthy, else the best-scoring spare. None means direct
+    connection (no proxy assigned) or no healthy route — use
+    account_reachable() to tell those apart.
     """
     from app.models import Proxy
-    from app.services.proxy_service import proxy_url_for
 
     own = session.get(Proxy, account.proxy_id) if account.proxy_id else None
     if own is None and not account.proxy_id:
         return None
     if own is not None and own.is_active and own.is_healthy:
-        return proxy_url_for(own)
-    spare = pick_spare_proxy(
+        return own
+    return pick_spare_proxy(
         session,
         exclude_id=own.id if own else None,
         prefer_country=own.country if own else None,
     )
-    return proxy_url_for(spare) if spare is not None else None
+
+
+def resolve_proxy_url(session, account) -> "str | None":
+    """Connection URL for this post: own proxy if healthy, else best spare."""
+    from app.services.proxy_service import proxy_url_for
+
+    return proxy_url_for(resolve_proxy(session, account))
 
 
 def account_reachable(session, account) -> bool:
     """False only when the account needs a proxy but none healthy exists."""
     if not account.proxy_id:
         return True
-    from app.models import Proxy
+    return resolve_proxy(session, account) is not None
 
-    own = session.get(Proxy, account.proxy_id)
-    if own is not None and own.is_active and own.is_healthy:
-        return True
-    spare = pick_spare_proxy(
-        session,
-        exclude_id=own.id if own else None,
-        prefer_country=own.country if own else None,
+
+def looks_like_proxy_error(err: str) -> bool:
+    """Heuristic: did this failure come from the proxy/network path (pure)?
+
+    Used to attribute post failures to the egress proxy (throttle is always
+    attributed — it is IP reputation by definition).
+    """
+    text = (err or "").lower()
+    markers = (
+        "proxy", "connect", "timeout", "timed out", "connection reset",
+        "connection aborted", "temporary failure", "name resolution",
+        "nodename nor servname", "network is unreachable", "broken pipe",
+        "connectionerror", "max retries exceeded",
     )
-    return spare is not None
+    return any(m in text for m in markers)
+
+
+def record_proxy_check(session, proxy, ok: bool, latency_ms: "int | None" = None, error: str = "") -> bool:
+    """Persist one health observation — from the checker OR live post traffic.
+
+    Success heals (fail streak reset). Failure increments the shared streak;
+    at MAX_PROXY_FAILS the proxy auto-disables and its accounts are parked.
+    Returns True when this call newly disabled the proxy. Commits.
+    """
+    now = _now()
+    proxy.last_checked = now
+    if ok:
+        proxy.is_healthy = True
+        proxy.fail_count = 0
+        proxy.last_error = None
+        if latency_ms is not None:
+            proxy.latency_ms = latency_ms
+        session.commit()
+        return False
+    proxy.fail_count = (proxy.fail_count or 0) + 1
+    proxy.is_healthy = False
+    proxy.last_error = (error or "check failed")[:500]
+    newly_disabled = False
+    parked = 0
+    if proxy.is_active and proxy.fail_count >= MAX_PROXY_FAILS:
+        from app.models import Account
+
+        proxy.is_active = False
+        newly_disabled = True
+        until = now + dt.timedelta(hours=PROXY_FAIL_COOLDOWN_HOURS)
+        for acc in session.execute(select(Account).where(Account.proxy_id == proxy.id)).scalars().all():
+            acc.cooldown_until = until
+            parked += 1
+        log_event_sync(
+            "WARNING", "proxy",
+            f"Proxy #{proxy.id} auto-disabled after {proxy.fail_count} failures; {parked} account(s) parked",
+        )
+    session.commit()
+    return newly_disabled
 
 
 def _now() -> dt.datetime:

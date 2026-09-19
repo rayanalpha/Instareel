@@ -268,7 +268,7 @@ def _proxy_out(p: Proxy) -> ProxyOut:
     return ProxyOut(
         id=p.id, url=p.url, protocol=p.protocol.value, username=p.username, country=p.country,
         is_healthy=p.is_healthy, last_checked=p.last_checked, fail_count=p.fail_count,
-        latency_ms=p.latency_ms, is_active=p.is_active, created_at=p.created_at,
+        latency_ms=p.latency_ms, last_error=p.last_error, is_active=p.is_active, created_at=p.created_at,
     )
 
 
@@ -290,6 +290,85 @@ async def create_proxy(body: ProxyCreate, _: str = Depends(get_current_admin), d
     await db.commit()
     await db.refresh(p)
     return _proxy_out(p)
+
+
+@proxy_router.post("/import")
+async def import_proxies(
+    file: UploadFile = File(...),
+    default_protocol: str = "http",
+    default_country: str = "",
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-import proxies from a text file (one per line, any shape).
+
+    Accepted per line: host:port, scheme://host:port, user:pass@host:port,
+    scheme://user:pass@host:port, host:port:user:pass — each optionally
+    suffixed with " |CC" / " #CC" country tag. Lines starting with # and
+    blank lines are skipped. No-auth (IP-whitelisted) lines work as-is.
+    Existing host:port entries are skipped, never duplicated.
+    """
+    from app.services.proxy_service import MAX_IMPORT_LINES, parse_proxy_line, proxy_fingerprint
+
+    if default_protocol not in ("http", "https", "socks4", "socks5"):
+        raise HTTPException(400, "Invalid default_protocol")
+    default_country = (default_country or "").strip().upper()[:2]
+    raw = await file.read()
+    try:
+        await file.close()
+    except Exception:
+        pass
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "List exceeds 1MB")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 text")
+    lines = text.splitlines()
+    if len(lines) > MAX_IMPORT_LINES:
+        raise HTTPException(413, f"Too many lines (max {MAX_IMPORT_LINES})")
+
+    have = set()
+    for p in (await db.execute(select(Proxy))).scalars().all():
+        known, _err = parse_proxy_line(p.url, "http")
+        if known:
+            have.add(proxy_fingerprint(known["scheme"], known["host"], known["port"]))
+
+    added, skipped, errors = 0, [], []
+    for i, line in enumerate(lines, 1):
+        spec, err = parse_proxy_line(line, default_protocol)
+        if spec is None:
+            if err not in ("blank/comment",):
+                errors.append({"line": i, "text": line.strip()[:80], "reason": err})
+            continue
+        key = proxy_fingerprint(spec["scheme"], spec["host"], spec["port"])
+        if key in have:
+            skipped.append({"line": i, "text": line.strip()[:80], "reason": "duplicate"})
+            continue
+        try:
+            proto = ProxyProtocol(spec["scheme"] if spec["scheme"] != "https" else "http")
+        except ValueError:
+            errors.append({"line": i, "text": line.strip()[:80], "reason": "bad scheme"})
+            continue
+        country = spec["country"] or (default_country or None)
+        db.add(Proxy(
+            url=f"{spec['scheme']}://{spec['host']}:{spec['port']}",
+            protocol=proto,
+            username=spec["username"] or None,
+            password_enc=encrypt_secret(spec["password"]) if spec["password"] else None,
+            country=country,
+        ))
+        have.add(key)
+        added += 1
+    await db.commit()
+    await log_event("INFO", "proxy", f"Bulk import: {added} added, {len(skipped)} duplicates, {len(errors)} bad lines")
+    return {
+        "added": added,
+        "duplicates_skipped": len(skipped),
+        "errors": (skipped + errors)[:100],
+    }
 
 
 @proxy_router.put("/{pid}", response_model=ProxyOut)

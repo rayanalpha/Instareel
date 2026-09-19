@@ -20,6 +20,93 @@ def proxy_url_for(proxy) -> str | None:
     return base
 
 
+#: Schemes accepted in proxy lists. https:// URLs are normalized to the
+#: http protocol (same CONNECT semantics for our checks/uploads).
+PROXY_SCHEMES = ("http", "https", "socks4", "socks5")
+MAX_IMPORT_LINES = 2000
+
+
+def parse_proxy_line(line: str, default_protocol: str = "http") -> "tuple[dict | None, str | None]":
+    """Parse one proxy-list line into a spec (pure — unit tested).
+
+    Accepted shapes (country suffix optional on any of them):
+      host:port | scheme://host:port | user:pass@host:port
+      scheme://user:pass@host:port | host:port:user:pass
+      ... + " |CC" or " #CC" country tag, "# comment" and blank lines skipped.
+
+    Returns (spec, None) or (None, reason). spec keys: scheme, host, port,
+    username, password, country. Callers map https->http for the DB enum.
+    """
+    import re
+
+    raw = (line or "").strip()
+    if not raw or raw.startswith("#"):
+        return None, "blank/comment"
+    # Trailing country tag: " ... |DE" or " ... #DE" (2 letters only).
+    country = ""
+    m = re.search(r"\s*[|#]\s*([A-Za-z]{2})\s*$", raw)
+    if m:
+        country = m.group(1).upper()
+        raw = raw[: m.start()].strip()
+        if not raw:
+            return None, "blank/comment"
+    scheme = (default_protocol or "http").lower()
+    rest = raw
+    if "://" in rest:
+        scheme, _, rest = rest.partition("://")
+        scheme = scheme.lower()
+        if scheme not in PROXY_SCHEMES:
+            return None, f"bad scheme '{scheme}'"
+    username = password = ""
+    hostport = rest
+    if "@" in rest:
+        auth, _, hostport = rest.rpartition("@")
+        if ":" in auth:
+            username, _, password = auth.partition(":")
+        else:
+            username = auth
+        if not username:
+            return None, "empty username"
+    else:
+        parts = hostport.split(":")
+        # host:port:user:pass (no brackets) — IPv6 must use scheme://[v6]:port.
+        if len(parts) == 4 and not hostport.startswith("["):
+            hostport, username, password = f"{parts[0]}:{parts[1]}", parts[2], parts[3]
+            if not username:
+                return None, "empty username"
+        elif len(parts) != 2 and not hostport.startswith("["):
+            return None, "want host:port or host:port:user:pass"
+    hostport = hostport.strip()
+    if hostport.startswith("["):
+        # [v6]:port
+        end = hostport.find("]")
+        host = hostport[1:end]
+        tail = hostport[end + 1 :]
+        port_s = tail[1:] if tail.startswith(":") else ""
+    else:
+        host, _, port_s = hostport.rpartition(":")
+    host = (host or "").strip().strip("[]")
+    try:
+        port = int((port_s or "").strip())
+    except ValueError:
+        return None, "bad port"
+    if not host:
+        return None, "empty host"
+    if not 1 <= port <= 65535:
+        return None, "port out of range"
+    return (
+        {"scheme": scheme, "host": host, "port": port,
+         "username": username.strip(), "password": password, "country": country},
+        None,
+    )
+
+
+def proxy_fingerprint(scheme: str, host: str, port: int) -> str:
+    """Dedupe key: normalized scheme + lowercase host + port."""
+    scheme = "http" if scheme == "https" else scheme
+    return f"{scheme}://{host.lower()}:{port}"
+
+
 def _tcp_check(url: str, timeout: int = 10) -> tuple[bool, int | None]:
     """Raw TCP connect — fast pre-check, proves the proxy host:port is reachable."""
     from urllib.parse import urlparse

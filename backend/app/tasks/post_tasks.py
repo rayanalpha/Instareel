@@ -186,8 +186,13 @@ def execute_post(self, post_id: int):
             username, password = account.username, decrypt_secret(account.password_enc)
             video_path = video.processed_path or video.raw_path
             # Own proxy if healthy, else best spare (country-stable) — never
-            # the raw name or a dead proxy.
-            proxy_url = sched.resolve_proxy_url(s, account)
+            # the raw name or a dead proxy. Keep the id so the outcome below
+            # feeds back into that proxy's health streak.
+            from app.services.proxy_service import proxy_url_for
+
+            _proxy = sched.resolve_proxy(s, account)
+            proxy_url = proxy_url_for(_proxy)
+            proxy_id = _proxy.id if _proxy is not None else None
 
         # Anti-detection pre-post delay (blocking sleep — task is sync).
         time.sleep(random.uniform(settings.IG_PRE_POST_DELAY_MIN, settings.IG_PRE_POST_DELAY_MAX))
@@ -222,6 +227,16 @@ def execute_post(self, post_id: int):
                 raise self.retry(exc=RuntimeError(error), countdown=countdown)
             set_status(PostStatus.failed, fail_reason=error[:2000], retry_count=retries + 1)
             touch_account(False, error)
+            if proxy_id is not None and (
+                kind == "throttled" or sched.looks_like_proxy_error(error)
+            ):
+                # Throttle is IP reputation by definition; transport-looking
+                # failures belong to the egress proxy too — feed both into its
+                # shared health streak (checker observations count the same).
+                with SyncSessionLocal() as s:
+                    _p = s.get(Proxy, proxy_id)
+                    if _p is not None:
+                        sched.record_proxy_check(s, _p, False, error=error)
             log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {error}")
             return {"post_id": post_id, "status": "failed", "error": error}
 
@@ -238,6 +253,11 @@ def execute_post(self, post_id: int):
             v = s.get(Video, video_id)
             if v is not None and v.status != VideoStatus.posted:
                 v.status = VideoStatus.posted
+            if proxy_id is not None:
+                _p = s.get(Proxy, proxy_id)
+                if _p is not None:
+                    # A clean upload through this proxy heals its streak.
+                    sched.record_proxy_check(s, _p, True)
             s.commit()
         log_event_sync("INFO", "post", f"Posted to @{username}", {"post_id": post_id, "url": permalink})
         return {"post_id": post_id, "status": "posted", "url": permalink}

@@ -35,6 +35,7 @@ class Proxy(Base, TimestampMixin):
     last_checked: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     accounts: Mapped[list["Account"]] = relationship(back_populates="proxy")

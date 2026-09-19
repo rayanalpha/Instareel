@@ -184,13 +184,9 @@ def check_all_proxies():
     from sqlalchemy import select
 
     from app.database import SyncSessionLocal
-    from app.models import Account, Proxy
+    from app.models import Proxy
     from app.services.proxy_service import check_proxy_sync
-    from app.tasks.sync_helpers import (
-        MAX_PROXY_FAILS,
-        PROXY_FAIL_COOLDOWN_HOURS,
-        log_event_sync,
-    )
+    from app.tasks.sync_helpers import log_event_sync, record_proxy_check
 
     try:
         # Small jitter so the check doesn't fire at the exact same second as
@@ -212,32 +208,14 @@ def check_all_proxies():
                 snap = (p.url, p.username, p.password_enc)
             probe = SimpleNamespace(id=pid, url=snap[0], username=snap[1], password_enc=snap[2])
             ok, latency = check_proxy_sync(probe)
+            # One shared recorder for checker AND live-traffic observations —
+            # same streak, same threshold, same parking behavior.
             with SyncSessionLocal() as s:
                 p = s.get(Proxy, pid)
                 if not p:
                     continue
-                p.is_healthy = ok
-                p.latency_ms = latency
-                p.last_checked = dt.datetime.now(dt.timezone.utc)
-                p.fail_count = 0 if ok else p.fail_count + 1
-                if not ok and p.is_active and p.fail_count >= MAX_PROXY_FAILS:
-                    # Auto-disable: stop routing new posts through a dead proxy
-                    # and park its accounts in cooldown instead of failing them.
-                    p.is_active = False
-                    until = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
-                        hours=PROXY_FAIL_COOLDOWN_HOURS
-                    )
-                    parked = 0
-                    for acc in s.execute(
-                        select(Account).where(Account.proxy_id == pid)
-                    ).scalars().all():
-                        acc.cooldown_until = until
-                        parked += 1
-                    log_event_sync(
-                        "WARNING", "proxy",
-                        f"Proxy #{pid} auto-disabled after {p.fail_count} failures; {parked} account(s) parked",
-                    )
-                s.commit()
+                record_proxy_check(s, p, ok, latency_ms=latency,
+                                   error="" if ok else "periodic check failed")
                 results.append({"id": pid, "healthy": ok})
         log_event_sync("INFO", "system", f"Proxy health check: {len(results)} checked")
         return results

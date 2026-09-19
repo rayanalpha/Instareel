@@ -814,6 +814,192 @@ class TestAnalyticsQueries:
         asyncio.run(go())
 
 
+class TestProxyImport:
+    def _ok(self, line, default="http"):
+        from app.services.proxy_service import parse_proxy_line
+
+        spec, err = parse_proxy_line(line, default)
+        assert err is None, (line, err)
+        assert spec is not None
+        return spec
+
+    def _bad(self, line, default="http"):
+        from app.services.proxy_service import parse_proxy_line
+
+        spec, err = parse_proxy_line(line, default)
+        assert spec is None and err not in (None, "blank/comment")
+        return err
+
+    def test_shapes(self):
+        assert self._ok("1.2.3.4:8080") == (
+            {"scheme": "http", "host": "1.2.3.4", "port": 8080,
+             "username": "", "password": "", "country": ""})
+        assert self._ok("socks5://1.2.3.4:1080")["scheme"] == "socks5"
+        assert self._ok("https://1.2.3.4:443")["scheme"] == "https"
+        assert self._ok("1.2.3.4:8080:u:p")["username"] == "u"
+        assert self._ok("u:p@1.2.3.4:8080") == {
+            "scheme": "http", "host": "1.2.3.4", "port": 8080,
+            "username": "u", "password": "p", "country": ""}
+        assert self._ok("socks5://u:p@h:1")["password"] == "p"
+        assert self._ok("9.9.9.9:1080", "socks5")["scheme"] == "socks5"
+
+    def test_country_suffix_comment_blank(self):
+        from app.services.proxy_service import parse_proxy_line
+
+        assert self._ok("1.2.3.4:8080 |de")["country"] == "DE"
+        assert self._ok("1.2.3.4:8080 #us")["country"] == "US"
+        assert parse_proxy_line("# just a comment") == (None, "blank/comment")
+        assert parse_proxy_line("   ") == (None, "blank/comment")
+
+    def test_rejections(self):
+        assert self._bad("ftp://h:1").startswith("bad scheme")
+        assert self._bad("nope") == "want host:port or host:port:user:pass"
+        assert self._bad("h:99999") == "port out of range"
+        assert self._bad("h:notaport") == "bad port"
+        assert self._bad("h:1:u") == "want host:port or host:port:user:pass"
+        assert self._bad("http://:8080") == "empty host"
+
+    def test_fingerprint_normalizes(self):
+        from app.services.proxy_service import proxy_fingerprint as f
+
+        assert f("https", "H", 1) == f("http", "h", 1)
+        assert f("http", "a", 1) != f("http", "a", 2)
+        assert f("http", "a", 1) != f("socks5", "a", 1)
+
+
+class TestProxyEngine:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def _proxy(self, s, url="http://1.1.1.1:8080", **kw):
+        from app.models import Proxy, ProxyProtocol
+
+        p = Proxy(url=url, protocol=ProxyProtocol.http, fail_count=0, **kw)
+        s.add(p)
+        s.commit()
+        return p.id
+
+    def test_looks_like_proxy_error(self):
+        from app.tasks.sync_helpers import looks_like_proxy_error as looks
+
+        assert looks("generic: ProxyError: tunnel failed") is True
+        assert looks("generic: ConnectTimeout on POST") is True
+        assert looks("throttled: slow down") is False
+        assert looks("challenge_required: ...") is False
+        assert looks("") is False
+
+    def test_rank_prefers_clean_record(self):
+        from app.tasks.sync_helpers import rank_spare_proxies as rank
+
+        a = {"proxy": "flaky", "load": 0, "country": "DE", "latency": 10, "fail_count": 3}
+        b = {"proxy": "clean", "load": 5, "country": "US", "latency": 900, "fail_count": 0}
+        # Country still dominates (no geo-hop), but among peers the clean wins.
+        assert rank([a, b], "DE") == "flaky"
+        assert rank([a, b], "") == "clean"
+
+    def test_shared_streak_disables_and_parks(self):
+        from app.models import Account, Proxy
+        from app.tasks.sync_helpers import MAX_PROXY_FAILS, record_proxy_check
+
+        s = self._session()
+        pid = self._proxy(s)
+        acc = Account(username="parkme", password_enc="x", proxy_id=pid)
+        s.add(acc)
+        s.commit()
+        disabled = False
+        for _ in range(MAX_PROXY_FAILS):
+            disabled = record_proxy_check(s, s.get(Proxy, pid), False, error="boom")
+        assert disabled is True
+        p = s.get(Proxy, pid)
+        assert p is not None
+        assert p.is_active is False and p.is_healthy is False
+        assert p.last_error == "boom"
+        a = s.get(Account, acc.id)
+        assert a is not None and a.cooldown_until is not None
+        # Success heals the streak for a re-enabled proxy.
+        p.is_active = True
+        s.commit()
+        healed = s.get(Proxy, pid)
+        assert healed is not None
+        assert record_proxy_check(s, healed, True, latency_ms=42) is False
+        p = s.get(Proxy, pid)
+        assert p is not None
+        assert (p.fail_count, p.is_healthy, p.latency_ms, p.last_error) == (0, True, 42, None)
+
+    def test_resolve_proxy_object(self):
+        from app.models import Proxy
+        from app.tasks.sync_helpers import account_reachable, resolve_proxy, resolve_proxy_url
+
+        s = self._session()
+        pid = self._proxy(s)
+        from app.models import Account
+
+        acc = Account(username="r1", password_enc="x", proxy_id=pid)
+        s.add(acc)
+        s.commit()
+        acc = s.get(Account, acc.id)
+        assert isinstance(resolve_proxy(s, acc), Proxy)
+        assert resolve_proxy_url(s, acc) == "http://1.1.1.1:8080"
+        assert account_reachable(s, acc) is True
+
+
+class TestProxyImportEndpoint:
+    def test_bulk_import_dedupes_and_reports(self):
+        import uuid
+
+        from fastapi.testclient import TestClient
+
+        from app.api.deps import get_current_admin
+        from app.main import app
+
+        tag = uuid.uuid4().hex[:10]
+        text = (
+            "# comment line\n"
+            "\n"
+            f"{tag}a.test:8080\n"
+            f"socks5://{tag}b.test:1080 |DE\n"
+            f"{tag}c.test:1:u:p\n"
+            f"{tag}a.test:8080\n"
+            "not a proxy!!!\n"
+        )
+        app.dependency_overrides[get_current_admin] = lambda: "admin"
+        try:
+            with TestClient(app) as client:
+                r1 = client.post(
+                    "/api/v1/proxies/import",
+                    files={"file": ("list.txt", text, "text/plain")},
+                    data={"default_protocol": "http"},
+                )
+                assert r1.status_code == 200, r1.text
+                body = r1.json()
+                assert body["added"] == 3, body
+                assert body["duplicates_skipped"] == 1, body
+                assert any(e["reason"] != "duplicate" for e in body["errors"])
+                rows = client.get("/api/v1/proxies").json()
+                mine = [p for p in rows if ".test:" in (p["url"] or "")]
+                assert len(mine) == 3
+                by_url = {p["url"]: p for p in mine}
+                assert by_url[f"http://{tag}a.test:8080"]["username"] is None
+                assert by_url[f"socks5://{tag}b.test:1080"]["country"] == "DE"
+                assert by_url[f"http://{tag}c.test:1"]["username"] == "u"
+                # Re-import is fully idempotent.
+                r2 = client.post(
+                    "/api/v1/proxies/import",
+                    files={"file": ("list.txt", text, "text/plain")},
+                    data={"default_protocol": "http"},
+                )
+                assert r2.json()["added"] == 0
+        finally:
+            app.dependency_overrides.clear()
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
