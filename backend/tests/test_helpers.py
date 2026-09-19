@@ -1064,6 +1064,114 @@ class TestAutoPool:
         ]
 
 
+class TestCheckBatching:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def test_due_oldest_first_with_limit(self):
+        import datetime as dt
+
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import due_for_check
+
+        s = self._session()
+        now = dt.datetime.now(dt.timezone.utc)
+        ids = {}
+        for name, checked in (("old", now - dt.timedelta(hours=5)),
+                              ("new", now - dt.timedelta(minutes=1)),
+                              ("never", None)):
+            p = Proxy(url=f"http://{name}:1", protocol=ProxyProtocol.http,
+                      last_checked=checked)
+            s.add(p)
+            s.flush()
+            ids[name] = p.id
+        s.commit()
+        assert due_for_check(s, 10) == [ids["never"], ids["old"], ids["new"]]
+        assert due_for_check(s, 2) == [ids["never"], ids["old"]]
+
+    def test_sweep_skips_e2e(self, monkeypatch):
+        import socket
+        from types import SimpleNamespace
+
+        import httpx
+
+        from app.services import proxy_service
+
+        def _bomb(*a, **k):
+            raise AssertionError("e2e must not run in sweep mode")
+
+        monkeypatch.setattr(httpx, "Client", _bomb)
+
+        class FakeSock:
+            def close(self):
+                pass
+
+        monkeypatch.setattr(socket, "create_connection", lambda *a, **k: FakeSock())
+        probe = SimpleNamespace(id=1, url="http://9.9.9.9:8080", username=None, password_enc=None)
+        ok, ms = proxy_service.check_proxy_sync(probe, sweep_only=True)
+        assert ok is True and isinstance(ms, int)
+
+    def test_sweep_failure_is_tcp(self, monkeypatch):
+        import socket
+        from types import SimpleNamespace
+
+        from app.services import proxy_service
+
+        def _dead(*a, **k):
+            raise OSError("unreachable")
+
+        monkeypatch.setattr(socket, "create_connection", _dead)
+        probe = SimpleNamespace(id=2, url="http://10.255.255.1:8080", username=None, password_enc=None)
+        assert proxy_service.check_proxy_sync(probe, tcp_timeout=1, sweep_only=True) == (False, None)
+
+    def test_full_path_still_verifies_e2e(self, monkeypatch):
+        import socket
+        from types import SimpleNamespace
+
+        import httpx
+
+        from app.services import proxy_service
+
+        class FakeSock:
+            def close(self):
+                pass
+
+        monkeypatch.setattr(socket, "create_connection", lambda *a, **k: FakeSock())
+
+        seen = {}
+
+        class FakeResp:
+            status_code = 200
+
+        class FakeClient:
+            def __init__(self, **kw):
+                seen.update(kw)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get(self, *a, **k):
+                return FakeResp()
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(httpx, "Client", FakeClient)
+        probe = SimpleNamespace(id=3, url="http://9.9.9.9:8080", username=None, password_enc=None)
+        ok, ms = proxy_service.check_proxy_sync(probe)
+        assert ok is True and isinstance(ms, int)
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

@@ -192,22 +192,46 @@ def check_all_proxies():
         # Small jitter so the check doesn't fire at the exact same second as
         # the posting tick every half hour (less machine-like fingerprint).
         time.sleep(random.uniform(0, 60))
+        from app.tasks.sync_helpers import (
+            PROXY_CHECK_BATCH,
+            PROXY_VERIFY_LIMIT,
+            SWEEP_TCP_TIMEOUT,
+            due_for_check,
+        )
+
         with SyncSessionLocal() as s:
-            # Check every proxy, including auto-disabled ones, so a recovered
-            # proxy shows fresh health data for the admin to re-enable.
-            ids = [p.id for p in s.execute(select(Proxy)).scalars().all()]
-        results = []
+            # Oldest-checked first (never-checked lead), capped per cycle —
+            # a 300-row pool drains over several 30-min ticks instead of
+            # pinning the solo worker for a quarter hour and stalling posts.
+            # Disabled rows are included so recoveries surface for re-enable.
+            ids = due_for_check(s, PROXY_CHECK_BATCH)
+        swept, verified = 0, 0
         for pid in ids:
             # Snapshot credentials first, then check WITHOUT holding the DB
-            # transaction open — a 10-25s network check must never pin a
-            # connection (SQLite lock contention / PG idle-in-transaction).
+            # transaction open — network checks must never pin a connection
+            # (SQLite lock contention / PG idle-in-transaction).
             with SyncSessionLocal() as s:
                 p = s.get(Proxy, pid)
                 if not p:
                     continue
                 snap = (p.url, p.username, p.password_enc)
             probe = SimpleNamespace(id=pid, url=snap[0], username=snap[1], password_enc=snap[2])
+            # Tier 1 — fast TCP sweep (seconds, not tens of seconds).
+            ok, latency = check_proxy_sync(probe, tcp_timeout=SWEEP_TCP_TIMEOUT, sweep_only=True)
+            swept += 1
+            if not ok:
+                with SyncSessionLocal() as s:
+                    p = s.get(Proxy, pid)
+                    if p is not None:
+                        record_proxy_check(s, p, False, error="tcp sweep failed")
+                continue
+            # Tier 2 — full end-to-end, but only for the first survivors each
+            # cycle; the rest wait for the next tick (their sweep already
+            # proved TCP liveness, so streaks stay honest).
+            if verified >= PROXY_VERIFY_LIMIT:
+                continue
             ok, latency = check_proxy_sync(probe)
+            verified += 1
             # One shared recorder for checker AND live-traffic observations —
             # same streak, same threshold, same parking behavior.
             with SyncSessionLocal() as s:
@@ -216,9 +240,8 @@ def check_all_proxies():
                     continue
                 record_proxy_check(s, p, ok, latency_ms=latency,
                                    error="" if ok else "periodic check failed")
-                results.append({"id": pid, "healthy": ok})
-        log_event_sync("INFO", "system", f"Proxy health check: {len(results)} checked")
-        return results
+        log_event_sync("INFO", "system", f"Proxy health check: {swept} swept, {verified} verified")
+        return {"swept": swept, "verified": verified}
     except Exception:  # noqa: BLE001
         log.exception("check_all_proxies failed")
         return {"error": "failed"}

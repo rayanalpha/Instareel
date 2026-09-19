@@ -155,22 +155,26 @@ def _https_via_proxy_check(url: str, timeout: int = 15) -> tuple[bool, int | Non
         return False, None
 
 
-def check_proxy_sync(proxy) -> tuple[bool, int | None]:
+def check_proxy_sync(
+    proxy, tcp_timeout: int = 10, e2e_timeout: int = 15, sweep_only: bool = False
+) -> tuple[bool, int | None]:
     """TCP pre-check + end-to-end HTTPS verification (Celery-safe).
 
     Returns (healthy, latency_ms) where latency is the end-to-end figure
-    when available, else the TCP figure (SOCKS proxies).
+    when available, else the TCP figure (SOCKS proxies). With
+    sweep_only=True only the fast TCP pass runs — used to triage hundreds
+    of pool rows before spending e2e time on the survivors.
     """
     from urllib.parse import urlparse
 
     url = proxy_url_for(proxy) or proxy.url
-    ok, tcp_ms = _tcp_check(url)
+    ok, tcp_ms = _tcp_check(url, timeout=tcp_timeout)
     if not ok:
         log.info("Proxy %s unhealthy: TCP connect failed", proxy.id)
         return False, None
-    if urlparse(url if "://" in url else f"http://{url}").scheme.startswith("socks"):
+    if sweep_only or urlparse(url if "://" in url else f"http://{url}").scheme.startswith("socks"):
         return True, tcp_ms
-    ok, e2e_ms = _https_via_proxy_check(url)
+    ok, e2e_ms = _https_via_proxy_check(url, timeout=e2e_timeout)
     if not ok:
         log.info("Proxy %s unhealthy: end-to-end Instagram check failed", proxy.id)
         return False, None

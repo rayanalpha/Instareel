@@ -207,6 +207,23 @@ POOL_PURGE_AFTER_DAYS = 7
 POOL_PURGE_LIMIT = 500
 #: Safety caps per refresh cycle so one giant list can't flood the DB.
 POOL_MAX_NEW_PER_SOURCE = 300
+#: Health-check batching: one cycle covers this many stalest rows with a fast
+#: TCP sweep, and fully verifies at most this many survivors. Bounds the task
+#: to minutes so posting ticks on the solo worker never starve.
+PROXY_CHECK_BATCH = 60
+PROXY_VERIFY_LIMIT = 20
+SWEEP_TCP_TIMEOUT = 3
+
+
+def due_for_check(session, limit: int = PROXY_CHECK_BATCH) -> list[int]:
+    """Oldest-checked proxy ids first (never-checked lead). Pure query, tested."""
+    from app.models import Proxy
+
+    return list(
+        session.execute(
+            select(Proxy.id).order_by(Proxy.last_checked.asc().nulls_first()).limit(limit)
+        ).scalars().all()
+    )
 
 
 def get_setting(session, key: str, default: str = "") -> str:

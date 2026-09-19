@@ -169,7 +169,7 @@ export default function ProxiesPage() {
           {test.data && <p className="mt-2 text-xs text-zinc-500">Last test: {JSON.stringify(test.data)}</p>}
         </Card>
       )}
-      <p className="text-xs text-zinc-500">Assign a proxy to an account from the Accounts page (proxy_id). Health checks run every 30 minutes via Celery Beat.</p>
+      <p className="text-xs text-zinc-500">Assign a proxy to an account from the Accounts page (proxy_id). Health checks run every 30 minutes in oldest-first batches (fast TCP sweep, full verify for survivors) so posting never stalls.</p>
     </div>
   );
 }
