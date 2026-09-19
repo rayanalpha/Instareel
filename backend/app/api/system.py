@@ -229,7 +229,18 @@ ws_router = APIRouter()
 @ws_router.websocket("/ws")
 async def ws_feed(websocket: WebSocket):
     await websocket.accept()
+    # Auth arrives as the first message frame ({ "token": ... }), never as a
+    # URL query param (URLs are written to access logs). Legacy ?token= URLs
+    # are still honored during the transition, then removed.
     token = websocket.query_params.get("token", "")
+    if not token:
+        try:
+            import asyncio as _asyncio
+
+            raw = await _asyncio.wait_for(websocket.receive_text(), timeout=10)
+            token = (json.loads(raw) or {}).get("token", "")
+        except Exception:
+            token = ""
     try:
         decode_token(token, expected_type="access")
     except ValueError:
