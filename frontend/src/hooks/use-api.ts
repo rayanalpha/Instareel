@@ -79,6 +79,9 @@ export function useBios() {
 export function useProxies() {
   return useQuery({ queryKey: ["proxies"], queryFn: () => get("/proxies") });
 }
+export function useProxySources() {
+  return useQuery({ queryKey: ["proxy-sources"], queryFn: () => get("/proxies/sources") });
+}
 export function useEffects() {
   return useQuery({ queryKey: ["effects"], queryFn: () => get("/effects") });
 }

@@ -198,6 +198,60 @@ def account_reachable(session, account) -> bool:
     return resolve_proxy(session, account) is not None
 
 
+#: Setting keys driving the auto pool (editable in dashboard Settings).
+POOL_COUNTRY_KEY = "pool_country"
+POOL_REQUIRE_COUNTRY_KEY = "pool_require_country"
+#: Fresh auto rows get this many half-hours to prove themselves before the
+#: purge may reap them (only inactive ones, never manual rows).
+POOL_PURGE_AFTER_DAYS = 7
+POOL_PURGE_LIMIT = 500
+#: Safety caps per refresh cycle so one giant list can't flood the DB.
+POOL_MAX_NEW_PER_SOURCE = 300
+
+
+def get_setting(session, key: str, default: str = "") -> str:
+    """Read a Setting row value with fallback (pure DB, no env)."""
+    from app.models import Setting
+
+    row = session.get(Setting, key)
+    return row.value if row is not None else default
+
+
+def pool_allows_country(spec_country: str, source_default: str, pool_country: str, require: bool) -> bool:
+    """Single-location gate for auto-pool inserts (pure — unit tested).
+
+    The line's own |CC/#CC tag wins, else the source default. When require
+    is on, only that exact country passes; when off, everything passes.
+    """
+    want = (pool_country or "").strip().upper()
+    if not require or not want:
+        return True
+    have = (spec_country or "").strip().upper() or (source_default or "").strip().upper()
+    return have == want
+
+
+def purge_stale_auto_proxies(session, max_age_days: int = POOL_PURGE_AFTER_DAYS, limit: int = POOL_PURGE_LIMIT) -> int:
+    """Delete long-dead AUTO pool rows. Manual rows are immortal. Returns count."""
+    from app.models import Proxy
+
+    cutoff = _now() - dt.timedelta(days=max_age_days)
+    rows = (
+        session.execute(
+            select(Proxy).where(
+                Proxy.source.is_not(None),
+                Proxy.source != "manual",
+                Proxy.is_active.is_(False),
+                Proxy.last_checked.is_not(None),
+                Proxy.last_checked < cutoff,
+            ).limit(limit)
+        )
+    ).scalars().all()
+    for p in rows:
+        session.delete(p)
+    session.commit()
+    return len(rows)
+
+
 def looks_like_proxy_error(err: str) -> bool:
     """Heuristic: did this failure come from the proxy/network path (pure)?
 

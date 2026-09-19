@@ -19,10 +19,11 @@ from app.schemas.content import (
     HashtagSetIn,
     HashtagSetOut,
     LogOut,
+    ProxySourceIn,
+    ProxySourceOut,
     ScheduleRuleIn,
     ScheduleRuleOut,
     SettingOut,
-    SettingUpdate,
 )
 from app.schemas.video import PostOut, SchedulePostIn, VideoOut, VideoSettingsUpdate
 
@@ -31,6 +32,6 @@ __all__ = [
     "LoginIn", "MeOut", "RefreshIn", "TokenOut",
     "AudioIn", "AudioOut",
     "BioIn", "BioOut", "CaptionIn", "CaptionOut", "EffectIn", "EffectOut",
-    "HashtagSetIn", "HashtagSetOut", "LogOut", "ScheduleRuleIn", "ScheduleRuleOut",
+    "HashtagSetIn", "HashtagSetOut", "LogOut", "ProxySourceIn", "ProxySourceOut", "ScheduleRuleIn", "ScheduleRuleOut",
     "SettingOut", "SettingUpdate", "PostOut", "SchedulePostIn", "VideoOut", "VideoSettingsUpdate",
 ]

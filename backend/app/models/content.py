@@ -99,6 +99,27 @@ class AudioTrack(Base, TimestampMixin):
     avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class ProxySource(Base, TimestampMixin):
+    """A remote proxy list feeding the auto pool (see refresh_proxy_pool).
+
+    Fetch is read-only text over HTTPS; every line goes through the same
+    strict parser as manual imports. Rows created from a source carry
+    Proxy.source == this name, so the purge only ever touches auto rows —
+    hand-added/imported proxies ("manual") are immortal.
+    """
+
+    __tablename__ = "proxy_sources"
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    default_protocol: Mapped[str] = mapped_column(String(16), default="http")
+    default_country: Mapped[str] = mapped_column(String(8), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_fetch_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_added: Mapped[int] = mapped_column(Integer, default=0)
+    last_total: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class LogLevel(str, enum.Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"

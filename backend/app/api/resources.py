@@ -11,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin, get_db
 from app.core.security import decrypt_secret, encrypt_secret
 from app.database import SessionLocal
-from app.models import Account, AudioTrack, BioConfig, EffectPreset, Proxy, ProxyProtocol
+from app.models import Account, AudioTrack, BioConfig, EffectPreset, Proxy, ProxyProtocol, ProxySource
 from app.schemas.account import ProxyCreate, ProxyOut, ProxyUpdate
-from app.schemas.content import AudioIn, AudioOut, BioIn, BioOut, EffectIn, EffectOut
+from app.schemas.content import (
+    AudioIn, AudioOut, BioIn, BioOut, EffectIn, EffectOut, ProxySourceIn, ProxySourceOut,
+)
 from app.services.log_service import log_event
 
 bio_router = APIRouter()
@@ -268,7 +270,8 @@ def _proxy_out(p: Proxy) -> ProxyOut:
     return ProxyOut(
         id=p.id, url=p.url, protocol=p.protocol.value, username=p.username, country=p.country,
         is_healthy=p.is_healthy, last_checked=p.last_checked, fail_count=p.fail_count,
-        latency_ms=p.latency_ms, last_error=p.last_error, is_active=p.is_active, created_at=p.created_at,
+        latency_ms=p.latency_ms, last_error=p.last_error, source=p.source or "manual",
+        is_active=p.is_active, created_at=p.created_at,
     )
 
 
@@ -285,7 +288,8 @@ async def create_proxy(body: ProxyCreate, _: str = Depends(get_current_admin), d
     except ValueError:
         raise HTTPException(400, "Invalid protocol")
     p = Proxy(url=body.url, protocol=proto, username=body.username,
-              password_enc=encrypt_secret(body.password) if body.password else None, country=body.country)
+              password_enc=encrypt_secret(body.password) if body.password else None, country=body.country,
+              source="manual")
     db.add(p)
     await db.commit()
     await db.refresh(p)
@@ -359,6 +363,7 @@ async def import_proxies(
             username=spec["username"] or None,
             password_enc=encrypt_secret(spec["password"]) if spec["password"] else None,
             country=country,
+            source="manual",
         ))
         have.add(key)
         added += 1
@@ -430,6 +435,97 @@ async def check_all(_: str = Depends(get_current_admin)):
 
     check_all_proxies.delay()
     return {"queued": True}
+
+
+def _source_out(x: ProxySource) -> ProxySourceOut:
+    return ProxySourceOut(
+        id=x.id, name=x.name, url=x.url, default_protocol=x.default_protocol,
+        default_country=x.default_country or "", is_active=x.is_active,
+        last_fetch_at=x.last_fetch_at, last_added=x.last_added, last_total=x.last_total,
+    )
+
+
+@proxy_router.get("/sources", response_model=list[ProxySourceOut])
+async def list_sources(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(ProxySource).order_by(ProxySource.name))).scalars().all()
+    return [_source_out(x) for x in rows]
+
+
+@proxy_router.post("/sources", response_model=ProxySourceOut, status_code=201)
+async def create_source(body: ProxySourceIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    if body.default_protocol not in ("http", "https", "socks4", "socks5"):
+        raise HTTPException(400, "Invalid default_protocol")
+    if body.url and not body.url.lower().startswith(("http://", "https://")):
+        raise HTTPException(400, "Source URL must be http(s)")
+    exists = (await db.execute(select(ProxySource).where(ProxySource.name == body.name))).scalar_one_or_none()
+    if exists:
+        raise HTTPException(409, "Source already exists")
+    x = ProxySource(
+        name=body.name, url=body.url, default_protocol=body.default_protocol,
+        default_country=(body.default_country or "").upper(),
+    )
+    db.add(x)
+    await db.commit()
+    await db.refresh(x)
+    return _source_out(x)
+
+
+@proxy_router.put("/sources/{sid}", response_model=ProxySourceOut)
+async def update_source(sid: int, body: ProxySourceIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    x = await db.get(ProxySource, sid)
+    if not x:
+        raise HTTPException(404, "Source not found")
+    if body.default_protocol not in ("http", "https", "socks4", "socks5"):
+        raise HTTPException(400, "Invalid default_protocol")
+    clash = (await db.execute(
+        select(ProxySource).where(ProxySource.name == body.name, ProxySource.id != sid)
+    )).scalar_one_or_none()
+    if clash:
+        raise HTTPException(409, "Another source already uses that name")
+    # Renaming a source orphans its rows' origin label — auto rows stay
+    # protected by the purge rule (source != manual), so this is display-only.
+    x.name, x.url = body.name, body.url
+    x.default_protocol, x.default_country = body.default_protocol, (body.default_country or "").upper()
+    x.is_active = body.is_active
+    await db.commit()
+    await db.refresh(x)
+    return _source_out(x)
+
+
+@proxy_router.delete("/sources/{sid}", status_code=204)
+async def delete_source(sid: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    x = await db.get(ProxySource, sid)
+    if not x:
+        raise HTTPException(404, "Source not found")
+    await db.delete(x)
+    await db.commit()
+    return None
+
+
+@proxy_router.post("/pool/refresh")
+async def refresh_pool_now(_: str = Depends(get_current_admin)):
+    from app.tasks.periodic_tasks import refresh_proxy_pool
+
+    refresh_proxy_pool.delay()
+    return {"queued": True}
+
+
+@proxy_router.post("/pool/purge")
+async def purge_pool_now(_: str = Depends(get_current_admin)):
+    import concurrent.futures
+
+    from app.database import SyncSessionLocal
+    from app.tasks.sync_helpers import purge_stale_auto_proxies
+
+    def _run() -> int:
+        with SyncSessionLocal() as s:
+            return purge_stale_auto_proxies(s)
+
+    # The purge helper is sync (same session style as the celery tasks).
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        n = pool.submit(_run).result(timeout=120)
+    await log_event("INFO", "proxy", f"Manual pool purge: {n} stale auto rows removed")
+    return {"purged": n}
 
 
 # ---- Effects ----

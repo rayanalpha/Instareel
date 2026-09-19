@@ -89,6 +89,21 @@ class AudioOut(AudioIn):
     avg_engagement: float | None
 
 
+class ProxySourceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    url: str = Field(min_length=8, max_length=1024)
+    default_protocol: str = "http"
+    default_country: str = Field(default="", max_length=2)
+    is_active: bool = True
+
+
+class ProxySourceOut(ProxySourceIn):
+    id: int
+    last_fetch_at: dt.datetime | None
+    last_added: int
+    last_total: int
+
+
 class SettingUpdate(BaseModel):
     value: str = Field(min_length=1, max_length=5000)
 

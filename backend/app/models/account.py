@@ -36,6 +36,9 @@ class Proxy(Base, TimestampMixin):
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Origin: "manual" for hand-added/imported rows, else the ProxySource
+    # name. Only auto rows are ever purged; manual rows are immortal.
+    source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     accounts: Mapped[list["Account"]] = relationship(back_populates="proxy")

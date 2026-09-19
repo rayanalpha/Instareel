@@ -66,5 +66,6 @@ class ProxyOut(BaseModel):
     fail_count: int
     latency_ms: int | None
     last_error: str | None = None
+    source: str | None = None
     is_active: bool
     created_at: dt.datetime

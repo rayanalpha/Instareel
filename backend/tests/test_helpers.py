@@ -1000,6 +1000,70 @@ class TestProxyImportEndpoint:
             app.dependency_overrides.clear()
 
 
+class TestAutoPool:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def test_country_gate(self):
+        from app.tasks.sync_helpers import pool_allows_country as gate
+
+        assert gate("DE", "", "DE", True) is True
+        assert gate("", "DE", "DE", True) is True  # source default counts
+        assert gate("US", "", "DE", True) is False
+        assert gate("", "", "DE", True) is False
+        assert gate("US", "", "DE", False) is True  # not required: all pass
+        assert gate("US", "", "", True) is True  # no pool country: all pass
+
+    def test_get_setting(self):
+        from app.models import Setting
+        from app.tasks.sync_helpers import get_setting
+
+        s = self._session()
+        assert get_setting(s, "pool_country", "") == ""
+        s.add(Setting(key="pool_country", value="DE"))
+        s.commit()
+        assert get_setting(s, "pool_country", "") == "DE"
+
+    def test_purge_only_old_inactive_auto(self):
+        import datetime as dt
+
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import purge_stale_auto_proxies
+
+        s = self._session()
+        old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=10)
+        fresh = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+
+        def mk(url, source, active, checked):
+            p = Proxy(url=url, protocol=ProxyProtocol.http, source=source,
+                      is_active=active, is_healthy=False, fail_count=9,
+                      last_checked=checked)
+            s.add(p)
+            return p
+
+        mk("http://old-auto:1", "list-a", False, old)     # reaped
+        mk("http://manual:1", "manual", False, old)       # immortal
+        mk("http://legacy:1", None, False, old)           # pre-feature rows immortal
+        mk("http://fresh:1", "list-a", False, fresh)      # too young
+        mk("http://active:1", "list-a", True, old)        # active rows kept
+        mk("http://never:1", "list-a", False, None)       # unchecked kept
+        s.commit()
+
+        assert purge_stale_auto_proxies(s) == 1
+        left = sorted(p.url for p in s.execute(select(Proxy)).scalars().all())
+        assert left == [
+            "http://active:1", "http://fresh:1", "http://legacy:1",
+            "http://manual:1", "http://never:1",
+        ]
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

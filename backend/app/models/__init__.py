@@ -6,6 +6,7 @@ from app.models.content import (
     EffectPreset,
     HashtagSet,
     LogLevel,
+    ProxySource,
     ScheduleRule,
     Setting,
     SystemLog
@@ -27,6 +28,7 @@ __all__ = [
     "BioConfig",
     "EffectPreset",
     "AudioTrack",
+    "ProxySource",
     "SystemLog",
     "LogLevel",
     "Setting",

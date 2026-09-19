@@ -224,6 +224,120 @@ def check_all_proxies():
         return {"error": "failed"}
 
 
+@celery.task(name="tasks.proxy_tasks.refresh_proxy_pool")
+def refresh_proxy_pool():
+    """Auto-pool refresh: fetch enabled sources, insert healthy-candidate rows.
+
+    Insert is cheap and untrusted input goes through the strict line parser;
+    actual health is decided later by the 30-min checker. Single-location
+    policy (pool_country + pool_require_country Settings) gates inserts.
+    Stale auto rows are reaped; manual rows are never touched.
+    """
+    import random
+    import time
+
+    from sqlalchemy import select
+
+    from app.core.security import encrypt_secret
+    from app.database import SyncSessionLocal
+    from app.models import Proxy, ProxyProtocol, ProxySource
+    from app.services.proxy_service import (
+        MAX_IMPORT_LINES,
+        parse_proxy_line,
+        proxy_fingerprint,
+    )
+    from app.tasks import sync_helpers as sched
+    from app.tasks.sync_helpers import (
+        POOL_MAX_NEW_PER_SOURCE,
+        POOL_REQUIRE_COUNTRY_KEY,
+        POOL_COUNTRY_KEY,
+        log_event_sync,
+        purge_stale_auto_proxies,
+    )
+
+    try:
+        time.sleep(random.uniform(0, 120))
+        with SyncSessionLocal() as s:
+            sources = s.execute(
+                select(ProxySource).where(ProxySource.is_active.is_(True))
+            ).scalars().all()
+            snap = [(x.id, x.name, x.url, x.default_protocol, x.default_country) for x in sources]
+            pool_country = sched.get_setting(s, POOL_COUNTRY_KEY, "")
+            require = sched.get_setting(s, POOL_REQUIRE_COUNTRY_KEY, "false").lower() == "true"
+            have = set()
+            for p in s.execute(select(Proxy)).scalars().all():
+                known, _e = parse_proxy_line(p.url, "http")
+                if known:
+                    have.add(proxy_fingerprint(known["scheme"], known["host"], known["port"]))
+        if not snap:
+            return {"sources": 0}
+        import httpx
+
+        total_added = 0
+        per_source = []
+        for sid, name, url, proto, country in snap:
+            added = total = 0
+            err = ""
+            try:
+                if not url.lower().startswith(("http://", "https://")):
+                    raise ValueError("source URL must be http(s)")
+                with httpx.Client(timeout=30, follow_redirects=True) as client:
+                    resp = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                    resp.raise_for_status()
+                    if len(resp.content) > 1024 * 1024:
+                        raise ValueError("list exceeds 1MB")
+                    lines = resp.text.splitlines()[:MAX_IMPORT_LINES]
+                total = len(lines)
+                with SyncSessionLocal() as s:
+                    made = 0
+                    for line in lines:
+                        spec, _e = parse_proxy_line(line, proto or "http")
+                        if spec is None:
+                            continue
+                        if not sched.pool_allows_country(
+                            spec["country"], country or "", pool_country, require
+                        ):
+                            continue
+                        key = proxy_fingerprint(spec["scheme"], spec["host"], spec["port"])
+                        if key in have:
+                            continue
+                        try:
+                            penum = ProxyProtocol(spec["scheme"] if spec["scheme"] != "https" else "http")
+                        except ValueError:
+                            continue
+                        s.add(Proxy(
+                            url=f"{spec['scheme']}://{spec['host']}:{spec['port']}",
+                            protocol=penum,
+                            username=spec["username"] or None,
+                            password_enc=encrypt_secret(spec["password"]) if spec["password"] else None,
+                            country=spec["country"] or (country or None),
+                            source=name,
+                        ))
+                        have.add(key)
+                        made += 1
+                        if made >= POOL_MAX_NEW_PER_SOURCE:
+                            break
+                    src = s.get(ProxySource, sid)
+                    if src is not None:
+                        src.last_fetch_at = dt.datetime.now(dt.timezone.utc)
+                        src.last_added = made
+                        src.last_total = total
+                    s.commit()
+                    added = made
+            except Exception as exc:  # noqa: BLE001 — one bad source must not kill the cycle
+                err = str(exc)[:300]
+                log.exception("proxy source %s fetch failed", name)
+            per_source.append({"source": name, "added": added, "lines": total, "error": err})
+            total_added += added
+        with SyncSessionLocal() as s:
+            purged = purge_stale_auto_proxies(s)
+        log_event_sync("INFO", "proxy", f"Pool refresh: {total_added} added, {purged} stale purged")
+        return {"added": total_added, "purged": purged, "sources": per_source}
+    except Exception:  # noqa: BLE001
+        log.exception("refresh_proxy_pool failed")
+        return {"error": "failed"}
+
+
 @celery.task(name="tasks.cleanup_tasks.clean_old_media")
 def clean_old_media(days: int = 30):
     from sqlalchemy import select
