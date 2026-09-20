@@ -41,6 +41,15 @@ export default function PhonePage() {
   const bio = current ? bios.find((b) => b.account_id === current.id) ?? null : null;
   const selectedVideo = selected ? videos.find((v) => v.id === selected.video_id) : undefined;
 
+  // Switching accounts resets the whole phone state: tab back to profile,
+  // selection cleared, reels scroll to top via key change below.
+  function pickAccount(id: number) {
+    if (id === current?.id) return;
+    setCurrentAccountId(id);
+    setSelected(null);
+    setTab("profile");
+  }
+
   // Keep selection valid when switching accounts.
   useEffect(() => {
     if (selected && current && selected.account_id !== current.id) setSelected(null);
@@ -58,7 +67,11 @@ export default function PhonePage() {
       <h1 className="text-xl font-extrabold tracking-tight">Phone view</h1>
       <div className="flex flex-wrap items-start justify-center gap-6">
         <div className="w-[375px] max-w-full">
-          <AccountSwitcher accounts={accounts} currentId={current.id} onPick={(id) => setCurrentAccountId(id)} />
+          <AccountSwitcher
+            accounts={accounts}
+            currentId={current.id}
+            onPick={pickAccount}
+          />
           <PhoneFrame>
             <div className="flex h-full flex-col">
               <div className="min-h-0 flex-1">
