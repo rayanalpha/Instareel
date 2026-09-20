@@ -32,3 +32,22 @@ export const useUi = create<UiState>((set) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 }));
+
+const CURRENT_ACCOUNT_KEY = "current_account_id";
+
+interface PhoneState {
+  currentAccountId: number | null;
+  setCurrentAccountId: (id: number | null) => void;
+}
+
+export const usePhone = create<PhoneState>((set) => ({
+  currentAccountId:
+    typeof window !== "undefined" && localStorage.getItem(CURRENT_ACCOUNT_KEY)
+      ? Number(localStorage.getItem(CURRENT_ACCOUNT_KEY))
+      : null,
+  setCurrentAccountId: (id) => {
+    if (id === null) localStorage.removeItem(CURRENT_ACCOUNT_KEY);
+    else localStorage.setItem(CURRENT_ACCOUNT_KEY, String(id));
+    set({ currentAccountId: id });
+  },
+}));
