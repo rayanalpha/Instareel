@@ -66,7 +66,7 @@ async def eligible_account(session, account_id: int | None = None) -> Account | 
         )
         .order_by(Account.last_post.asc().nulls_first())
     )
-    for acc in (await session.execute(q)).scalars().all():
+    for acc in (await session.execute(q.limit(500))).scalars().all():
         if acc.posts_today < effective_max_posts(acc.created_at, acc.max_daily_posts, now):
             return acc
     return None
@@ -139,11 +139,17 @@ async def pick_hashtags(session, last_tags: str = "") -> str:
     rows = (
         await session.execute(select(HashtagSet).where(HashtagSet.is_active.is_(True)))
     ).scalars().all()
-    rows = [r for r in rows if r.tags.strip() and r.tags.strip() != last_tags.strip()]
-    if not rows:
+    cands = []
+    for r in rows:
+        raw = (r.tags or "").strip()
+        if not raw or raw == last_tags.strip():
+            continue
+        tags = [t.strip() for t in raw.replace("\n", ",").split(",") if t.strip()]
+        if tags:
+            cands.append((r, tags))
+    if not cands:
         return ""
-    chosen = random.choice(rows)
-    tags = [t.strip() for t in chosen.tags.replace("\n", ",").split(",") if t.strip()]
-    chosen.use_count += 1
+    chosen, tags = random.choice(cands)
+    chosen.use_count = (chosen.use_count or 0) + 1
     selected = random.sample(tags, k=min(len(tags), random.randint(3, 5)))
     return " ".join(t if t.startswith("#") else f"#{t}" for t in selected)

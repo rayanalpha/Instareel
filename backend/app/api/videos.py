@@ -5,12 +5,12 @@ import os
 import uuid
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin, get_db
+from app.api.deps import get_current_admin, get_db, limiter
 from app.config import settings
 from app.models import Post, PostStatus, Video, VideoStatus
 from app.schemas.video import PostOut, SchedulePostIn, VideoOut, VideoSettingsUpdate
@@ -78,7 +78,9 @@ async def list_videos(
 
 
 @router.post("/upload", response_model=VideoOut, status_code=201)
+@limiter.limit("10/minute")
 async def upload_video(
+    request: Request,
     file: UploadFile = File(...),
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
@@ -164,9 +166,16 @@ async def get_video(video_id: int, _: str = Depends(get_current_admin), db: Asyn
 
 @router.delete("/{video_id}", status_code=204)
 async def delete_video(video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import func as _func
+
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
+    # Deleting would NULL the FK on referencing posts (NOT NULL -> 500) and
+    # destroy analytics history — refuse with a clear message instead.
+    n_posts = (await db.execute(select(_func.count(Post.id)).where(Post.video_id == video_id))).scalar() or 0
+    if n_posts:
+        raise HTTPException(409, f"Video has {n_posts} post(s) — delete them first to preserve history")
     for path in (v.raw_path, v.processed_path, v.thumbnail_path):
         try:
             if path and os.path.exists(path):
@@ -179,7 +188,8 @@ async def delete_video(video_id: int, _: str = Depends(get_current_admin), db: A
 
 
 @router.post("/{video_id}/process")
-async def trigger_process(video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def trigger_process(request: Request, video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -192,7 +202,8 @@ async def trigger_process(video_id: int, effect_filter: str = "", _: str = Depen
 
 
 @router.post("/{video_id}/reprocess")
-async def reprocess(video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def reprocess(request: Request, video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -220,6 +231,9 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
         raise HTTPException(404, "Video not found")
     if body.trim_start is not None and body.trim_end is not None and body.trim_end <= body.trim_start:
         raise HTTPException(400, "trim_end must be greater than trim_start")
+    if body.custom_filters is not None and any(c in body.custom_filters for c in ";[]"):
+        # Filtergraph metacharacters would break out of [0:v]...[outv].
+        raise HTTPException(400, "custom_filters must be a plain comma chain (no ; [ ])")
     for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end",
                     "is_trial", "trial_strategy", "add_watermark"):
         val = getattr(body, field)
@@ -230,9 +244,17 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
     return _out(v)
 
 
-def _serve(path: str | None, media_type: str):
+EXT_MIME = {
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+}
+
+
+def _serve(path: str | None, media_type: str | None = None):
     if not path or not os.path.exists(path):
         raise HTTPException(404, "File not found")
+    if not media_type:
+        media_type = EXT_MIME.get(os.path.splitext(path)[1].lower(), "video/mp4")
     return FileResponse(path, media_type=media_type)
 
 
@@ -241,7 +263,7 @@ async def preview(video_id: int, _: str = Depends(get_current_admin), db: AsyncS
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
-    return _serve(v.processed_path or v.raw_path, "video/mp4")
+    return _serve(v.processed_path or v.raw_path)
 
 
 @router.get("/{video_id}/thumbnail")
@@ -281,8 +303,6 @@ async def list_posts(
 
 @posts_router.get("/queue", response_model=list[PostOut])
 async def post_queue(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    import datetime as dt
-
     rows = (
         await db.execute(
             select(Post)

@@ -62,4 +62,8 @@ def decode_token(token: str, expected_type: str = "access") -> str:
         raise ValueError("Invalid token") from exc
     if payload.get("type") != expected_type:
         raise ValueError("Wrong token type")
-    return str(payload["sub"])
+    sub = payload.get("sub")
+    if not sub:
+        # A structurally valid JWT without subject must 401, never 500.
+        raise ValueError("Invalid token")
+    return str(sub)

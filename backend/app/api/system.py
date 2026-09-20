@@ -14,7 +14,6 @@ import redis.asyncio as aioredis
 from app.api.deps import get_current_admin, get_db
 from app.config import settings
 from app.core.security import decode_token
-from app.database import SessionLocal
 from app.models import LogLevel, Post, PostStatus, Setting, SystemLog, Video
 from app.schemas.content import LogOut, SettingOut, SettingUpdate
 from app.services import analytics_service, log_service
@@ -25,7 +24,7 @@ settings_router = APIRouter()
 
 
 @analytics_router.get("/overview")
-async def overview(days: int = Query(default=30, le=365), _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def overview(days: int = Query(default=30, ge=1, le=365), _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
     data = await analytics_service.overview(db, since)
     data["series"] = await analytics_service.views_over_time(db, days)
@@ -33,7 +32,7 @@ async def overview(days: int = Query(default=30, le=365), _: str = Depends(get_c
 
 
 @analytics_router.get("/posts")
-async def posts_breakdown(limit: int = 100, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def posts_breakdown(limit: int = Query(default=100, ge=1, le=2000), _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(Post).where(Post.status == PostStatus.posted).order_by(desc(Post.posted_at)).limit(limit))).scalars().all()
     return [
         {"id": p.id, "account_id": p.account_id, "views_7d": p.views_7d, "likes_7d": p.likes_7d,
@@ -51,18 +50,30 @@ async def accounts_breakdown(_: str = Depends(get_current_admin), db: AsyncSessi
 async def effects_breakdown(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     from app.models import EffectPreset, Video
 
-    presets = (await db.execute(select(EffectPreset))).scalars().all()
-    out = []
-    for preset in presets:
-        row = (
+    # One grouped query — not one aggregate per preset (N+1).
+    agg = {
+        (r[0] or ""): r[1:]
+        for r in (
             await db.execute(
-                select(func.count(Post.id), func.avg(Post.engagement_rate), func.coalesce(func.sum(Post.views_7d), 0))
+                select(
+                    Video.effect_preset,
+                    func.count(Post.id),
+                    func.avg(Post.engagement_rate),
+                    func.coalesce(func.sum(Post.views_7d), 0),
+                )
                 .join(Video, Video.id == Post.video_id)
-                .where(Video.effect_preset == preset.name, Post.status == PostStatus.posted)
+                .where(Post.status == PostStatus.posted, Video.effect_preset.is_not(None))
+                .group_by(Video.effect_preset)
             )
-        ).one()
-        out.append({"name": preset.name, "posts": row[0], "avg_engagement": round(float(row[1] or 0), 2), "views": int(row[2] or 0)})
-    return out
+        ).all()
+    }
+    presets = (await db.execute(select(EffectPreset))).scalars().all()
+    return [
+        {"name": p.name, "posts": agg.get(p.name, (0, None, 0))[0],
+         "avg_engagement": round(float(agg.get(p.name, (0, None, 0))[1] or 0), 2),
+         "views": int(agg.get(p.name, (0, None, 0))[2] or 0)}
+        for p in presets
+    ]
 
 
 @analytics_router.get("/audio")
@@ -74,16 +85,26 @@ async def audio_breakdown(_: str = Depends(get_current_admin), db: AsyncSession 
     """
     from app.models import AudioTrack, Video
 
+    agg = {
+        (r[0] or ""): r[1:]
+        for r in (
+            await db.execute(
+                select(
+                    Video.audio_track,
+                    func.count(Post.id),
+                    func.avg(Post.engagement_rate),
+                    func.coalesce(func.sum(Post.views_7d), 0),
+                )
+                .join(Video, Video.id == Post.video_id)
+                .where(Post.status == PostStatus.posted, Video.audio_track.is_not(None))
+                .group_by(Video.audio_track)
+            )
+        ).all()
+    }
     tracks = (await db.execute(select(AudioTrack))).scalars().all()
     out = []
     for track in tracks:
-        row = (
-            await db.execute(
-                select(func.count(Post.id), func.avg(Post.engagement_rate), func.coalesce(func.sum(Post.views_7d), 0))
-                .join(Video, Video.id == Post.video_id)
-                .where(Video.audio_track == track.name, Post.status == PostStatus.posted)
-            )
-        ).one()
+        row = agg.get(track.name, (0, None, 0))
         out.append({
             "id": track.id, "name": track.name, "posts": row[0],
             "avg_engagement": round(float(row[1] or 0), 2), "views": int(row[2] or 0),
@@ -216,11 +237,12 @@ async def update_setting(
 
 
 @settings_router.post("/test-instagram")
-async def test_instagram(_: str = Depends(get_current_admin)):
-    async with SessionLocal() as db:
-        from app.models import Account
+async def test_instagram(
+    _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db),
+):
+    from app.models import Account
 
-        count = (await db.execute(select(func.count(Account.id)))).scalar() or 0
+    count = (await db.execute(select(func.count(Account.id)))).scalar() or 0
     return {"ok": True, "accounts": count, "note": "Use /accounts/{id}/test-session for a live session check"}
 
 

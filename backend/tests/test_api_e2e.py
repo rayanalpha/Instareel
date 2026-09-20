@@ -1,0 +1,617 @@
+"""End-to-end API tests: real HTTP through TestClient, isolated async DB.
+
+Skipped by design (need live infra): celery .delay paths (process/reprocess/
+retry/check-all/pool ops), IG-network endpoints (test-session, bio apply,
+proxy test), websocket/redis paths.
+"""
+import io
+import os
+import wave
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.api.deps import get_current_admin, get_db
+from app.config import settings
+from app.database import Base
+from app.main import app
+from app.models import (
+    Account,
+    AccountStatus,
+    AudioTrack,
+    BioConfig,
+    CaptionTemplate,
+    EffectPreset,
+    HashtagSet,
+    Post,
+    PostStatus,
+    Proxy,
+    ProxyProtocol,
+    ScheduleRule,
+    Video,
+    VideoStatus,
+)
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/t.db")
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_db():
+        async with maker() as s:
+            yield s
+
+    async def _create():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    import asyncio
+
+    asyncio.get_event_loop().run_until_complete(_create())
+    monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path / "media"))
+    monkeypatch.setattr(settings, "AUTO_PROCESS_ON_UPLOAD", False)
+    app.dependency_overrides[get_current_admin] = lambda: "admin"
+    app.dependency_overrides[get_db] = override_db
+    with TestClient(app) as c:
+        yield c, maker, engine
+    app.dependency_overrides.clear()
+
+
+def _wav(path, seconds=3):
+    import math
+    import struct
+
+    with wave.open(str(path), "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        frames = b"".join(
+            struct.pack("<h", int(10000 * math.sin(2 * math.pi * 440 * i / 44100)))
+            for i in range(44100 * seconds)
+        )
+        w.writeframes(frames)
+
+
+def _png(path):
+    from PIL import Image
+
+    Image.new("RGB", (200, 200), (200, 30, 30)).save(path)
+
+
+class TestAuthFlow:
+    def test_login_me_refresh(self, client):
+        c, _, _ = client
+        r = c.post("/api/v1/auth/login", json={"username": "admin", "password": "changeme-please"})
+        assert r.status_code == 200, r.text
+        tokens = r.json()
+        me = c.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+        assert me.status_code == 200 and me.json()["username"] == "admin"
+        r2 = c.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        assert r2.status_code == 200
+        me2 = c.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {r2.json()['access_token']}"})
+        assert me2.status_code == 200
+
+    def test_bad_login_401(self, client):
+        c, _, _ = client
+        assert c.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"}).status_code == 401
+
+    def test_no_token_401(self, client):
+        # The shared fixture bypasses auth via dependency_overrides — drop
+        # them temporarily to prove the real guard rejects anonymous calls.
+        from app.main import app as _app
+
+        saved = dict(_app.dependency_overrides)
+        _app.dependency_overrides.clear()
+        try:
+            with TestClient(_app) as raw:
+                assert raw.get("/api/v1/auth/me").status_code in (401, 403)
+        finally:
+            _app.dependency_overrides.update(saved)
+
+
+class TestAccounts:
+    def test_crud_cooldown_activate(self, client):
+        c, _, _ = client
+        r = c.post("/api/v1/accounts", json={"username": "e2e1", "password": "pw", "max_daily_posts": 2})
+        assert r.status_code == 201, r.text
+        aid = r.json()["id"]
+        assert c.get("/api/v1/accounts").json()[0]["username"] == "e2e1"
+        assert c.get(f"/api/v1/accounts/{aid}").status_code == 200
+        assert c.post(f"/api/v1/accounts/{aid}/cooldown?hours=5").status_code == 200
+        assert c.get(f"/api/v1/accounts/{aid}").json()["status"] == "cooldown"
+        assert c.post(f"/api/v1/accounts/{aid}/activate").status_code == 200
+        assert c.get(f"/api/v1/accounts/{aid}").json()["status"] == "active"
+        assert c.put(f"/api/v1/accounts/{aid}", json={"notes": "hi"}).status_code == 200
+        assert c.delete(f"/api/v1/accounts/{aid}").status_code == 204
+        assert c.get(f"/api/v1/accounts/{aid}").status_code == 404
+
+    def test_delete_account_removes_session_file(self, client, tmp_path):
+        import glob
+        import os
+
+        sessions = os.path.join(tmp_path, "media", "sessions")
+        c, _, _ = client
+        aid = c.post("/api/v1/accounts", json={"username": "sdel", "password": "pw"}).json()["id"]
+        c.post(f"/api/v1/accounts/{aid}/session",
+               files={"file": ("s.json", b'{"cookies": {"sessionid": "1:x"}}', "application/json")})
+        assert len(glob.glob(os.path.join(sessions, "*.json"))) == 1
+        assert c.delete(f"/api/v1/accounts/{aid}").status_code == 204
+        assert glob.glob(os.path.join(sessions, "*.json")) == []
+
+    def test_duplicate_409(self, client):
+        c, _, _ = client
+        c.post("/api/v1/accounts", json={"username": "dup", "password": "pw"})
+        assert c.post("/api/v1/accounts", json={"username": "dup", "password": "pw"}).status_code == 409
+
+    def test_session_upload_roundtrip(self, client):
+        c, _, _ = client
+        aid = c.post("/api/v1/accounts", json={"username": "sess", "password": "pw"}).json()["id"]
+        bad = c.post(f"/api/v1/accounts/{aid}/session", files={"file": ("s.json", b"nope", "application/json")})
+        assert bad.status_code == 400
+        good = c.post(
+            f"/api/v1/accounts/{aid}/session",
+            files={"file": ("s.json", b'{"cookies": {"sessionid": "1:x"}, "uuids": {}}', "application/json")},
+        )
+        assert good.status_code == 200, good.text
+        assert c.get(f"/api/v1/accounts/{aid}").json()["has_session"] is True
+        assert c.delete(f"/api/v1/accounts/{aid}/session").status_code == 204
+
+
+class TestVideos:
+    def _mp4(self, tmp_path):
+        import subprocess
+
+        # conftest MEDIA_ROOT is per-test tmp; module tmp_path fixture differs —
+        # generate into the OS temp dir instead.
+        import tempfile
+
+        out = os.path.join(tempfile.gettempdir(), "e2e_src.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", out],
+            check=True,
+        )
+        return out
+
+    def test_upload_list_get_settings_preview_delete(self, client, tmp_path):
+        c, _, _ = client
+        src = self._mp4(tmp_path)
+        with open(src, "rb") as f:
+            r = c.post("/api/v1/videos/upload", files={"file": ("v.mp4", f, "video/mp4")}, timeout=120)
+        assert r.status_code == 201, r.text
+        vid = r.json()["id"]
+        assert r.json()["status"] == "uploaded"
+        assert len(c.get("/api/v1/videos").json()) == 1
+        assert c.get(f"/api/v1/videos/{vid}").status_code == 200
+        # Invalid trim pair rejected.
+        bad = c.put(f"/api/v1/videos/{vid}/settings", json={"trim_start": 5, "trim_end": 2})
+        assert bad.status_code == 400
+        # Dangerous filter metachars rejected.
+        bad2 = c.put(f"/api/v1/videos/{vid}/settings", json={"custom_filters": "eq=1;rm -rf"})
+        assert bad2.status_code == 400
+        ok = c.put(f"/api/v1/videos/{vid}/settings",
+                   json={"effect_preset": "clean_natural", "audio_track": None,
+                         "trim_start": 0.5, "trim_end": 3.0, "add_watermark": True})
+        assert ok.status_code == 200, ok.text
+        body = ok.json()
+        assert body["effect_preset"] == "clean_natural" and body["trim_start"] == 0.5
+        assert c.get(f"/api/v1/videos/{vid}/status").json()["status"] == "uploaded"
+        pv = c.get(f"/api/v1/videos/{vid}/preview")
+        assert pv.status_code == 200 and pv.headers["content-type"] == "video/mp4"
+        # Duplicate content rejected.
+        with open(src, "rb") as f:
+            assert c.post("/api/v1/videos/upload", files={"file": ("v.mp4", f, "video/mp4")}, timeout=120).status_code == 409
+        # Bad extension rejected.
+        assert c.post("/api/v1/videos/upload", files={"file": ("x.txt", b"hi", "text/plain")}).status_code == 400
+        assert c.delete(f"/api/v1/videos/{vid}").status_code == 204
+
+    def test_schedule_guards(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            import asyncio
+
+            async with maker() as s:
+                s.add(Account(username="sn", password_enc="x"))
+                s.add(Video(original_filename="a.mp4", raw_path="/tmp/a.mp4",
+                            md5_hash="snv", status=VideoStatus.uploaded))
+                await s.commit()
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(seed())
+        acc = c.get("/api/v1/accounts").json()[0]["id"]
+        vids = c.get("/api/v1/videos").json()
+        vid = vids[0]["id"]
+        assert c.post("/api/v1/posts/schedule", json={"video_id": 999999, "account_id": acc}).status_code == 404
+        assert c.post("/api/v1/posts/schedule", json={"video_id": vid, "account_id": acc}).status_code == 400
+
+
+class TestPosts:
+    def test_schedule_get_list_queue_delete(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="p1", password_enc="x"))
+                s.add(Video(original_filename="p.mp4", raw_path="/tmp/p.mp4",
+                            md5_hash="pv", status=VideoStatus.processed))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "p1"))).scalar_one()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "pv"))).scalar_one()
+                return acc.id, vid.id
+
+        import asyncio
+
+        acc_id, vid_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.post("/api/v1/posts/schedule",
+                   json={"video_id": vid_id, "account_id": acc_id, "caption": "hi", "hashtags": "#a"})
+        assert r.status_code == 201, r.text
+        pid = r.json()["id"]
+        assert r.json()["caption"] == "hi"
+        assert c.get(f"/api/v1/posts/{pid}").status_code == 200
+        assert any(p["id"] == pid for p in c.get("/api/v1/posts").json())
+        assert any(p["id"] == pid for p in c.get("/api/v1/posts/queue").json())
+        # Only failed posts can be retried.
+        assert c.post(f"/api/v1/posts/{pid}/retry").status_code == 400
+        assert c.delete(f"/api/v1/posts/{pid}").status_code == 204
+
+
+class TestResources:
+    def test_effects_crud(self, client):
+        c, _, _ = client
+        r = c.post("/api/v1/effects", json={"name": "t1", "description": "d", "ffmpeg_filter": "eq=1"})
+        assert r.status_code == 201, r.text
+        eid = r.json()["id"]
+        assert c.post("/api/v1/effects", json={"name": "t1"}).status_code == 409
+        assert c.put(f"/api/v1/effects/{eid}", json={"name": "t1", "description": "d2"}).status_code == 200
+        assert c.delete(f"/api/v1/effects/{eid}").status_code == 204
+
+    def test_audio_upload_list_update_delete(self, client, tmp_path):
+        c, _, _ = client
+        _wav(tmp_path / "t.wav")
+        with open(tmp_path / "t.wav", "rb") as f:
+            r = c.post("/api/v1/audio/upload", files={"file": ("t.wav", f, "audio/wav")},
+                       data={"name": "snd", "music_volume": "0.5"})
+        assert r.status_code == 201, r.text
+        tid = r.json()["id"]
+        assert r.json()["duration"] and r.json()["duration"] > 2.5
+        # Form fields must arrive (regression: unannotated params were dropped).
+        assert r.json()["name"] == "snd" and r.json()["music_volume"] == 0.5
+        assert len(c.get("/api/v1/audio").json()) == 1
+        assert c.put(f"/api/v1/audio/{tid}", json={"name": "snd", "music_volume": 0.9}).status_code == 200
+        assert c.put(f"/api/v1/audio/{tid}", json={"name": "snd", "music_volume": 9}).status_code == 422
+        assert c.delete(f"/api/v1/audio/{tid}").status_code == 204
+        bad = c.post("/api/v1/audio/upload", files={"file": ("x.txt", b"hi", "text/plain")})
+        assert bad.status_code == 400
+
+    def test_bios_crud_history(self, client):
+        c, _, _ = client
+        acc = c.post("/api/v1/accounts", json={"username": "b1", "password": "pw"}).json()["id"]
+        assert c.post("/api/v1/bios", json={"account_id": 999, "text": "x"}).status_code == 404
+        r = c.post("/api/v1/bios", json={"account_id": acc, "text": "hello", "link_url": "https://t.me/x"})
+        assert r.status_code == 201, r.text
+        bid = r.json()["id"]
+        assert c.put(f"/api/v1/bios/{bid}", json={"account_id": acc, "text": "hello2"}).status_code == 200
+        h = c.get(f"/api/v1/bios/{bid}/history")
+        assert h.status_code == 200 and h.json() == []
+        assert c.delete(f"/api/v1/bios/{bid}").status_code == 204
+
+    def test_bio_link_guard(self, client):
+        c, _, _ = client
+        acc = c.post("/api/v1/accounts", json={"username": "b2", "password": "pw"}).json()["id"]
+        bad = c.post("/api/v1/bios", json={"account_id": acc, "text": "x", "link_url": "javascript:alert(1)"})
+        assert bad.status_code == 422
+        ok = c.post("/api/v1/bios", json={"account_id": acc, "text": "x", "link_url": "t.me/x"})
+        assert ok.status_code == 201 and ok.json()["link_url"] == "https://t.me/x"
+        bid = ok.json()["id"]
+        # update_bio validates the account FK as well.
+        assert c.put(f"/api/v1/bios/{bid}", json={"account_id": 999999, "text": "x"}).status_code == 404
+
+    def test_proxies_crud_import(self, client, tmp_path):
+        c, _, _ = client
+        r = c.post("/api/v1/proxies", json={"url": "http://1.1.1.1:8080", "protocol": "http"})
+        assert r.status_code == 201, r.text
+        assert c.post("/api/v1/proxies", json={"url": "x", "protocol": "nope"}).status_code == 400
+        lst = (tmp_path / "l.txt")
+        lst.write_text("2.2.2.2:8080\nsocks5://3.3.3.3:1080 |DE\njunk line here\n", encoding="utf-8")
+        with open(lst, "rb") as f:
+            imp = c.post("/api/v1/proxies/import", files={"file": ("l.txt", f, "text/plain")},
+                         data={"default_protocol": "http", "default_country": "FR"})
+        assert imp.status_code == 200, imp.text
+        assert imp.json()["added"] == 2
+        rows = c.get("/api/v1/proxies").json()
+        assert len(rows) == 3
+        # Form fields must actually arrive (not silently fall back to defaults):
+        plain = next(p for p in rows if p["url"] == "http://2.2.2.2:8080")
+        assert plain["country"] == "FR", plain
+
+    def test_rules_captions_crud(self, client):
+        c, _, _ = client
+        acc = c.post("/api/v1/accounts", json={"username": "r1", "password": "pw"}).json()["id"]
+        assert c.post("/api/v1/schedule", json={"name": "x", "hour": 10, "account_id": 999}).status_code == 404
+        rule = c.post("/api/v1/schedule", json={"name": "morn", "hour": 10, "minute": 5, "account_id": acc})
+        assert rule.status_code == 201, rule.text
+        rid = rule.json()["id"]
+        assert c.post(f"/api/v1/schedule/{rid}/toggle").json()["is_active"] is False
+        assert c.delete(f"/api/v1/schedule/{rid}").status_code == 204
+        cap = c.post("/api/v1/captions", json={"name": "c", "content": "hello {x}"})
+        assert cap.status_code == 201
+        tag = c.post("/api/v1/hashtags", json={"name": "h", "tags": "#a,#b"})
+        assert tag.status_code == 201
+        assert len(c.get("/api/v1/captions").json()) == 1
+        assert c.delete(f"/api/v1/captions/{cap.json()['id']}").status_code == 204
+        assert c.delete(f"/api/v1/hashtags/{tag.json()['id']}").status_code == 204
+
+    def test_analytics_logs_settings(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="a1", password_enc="x"))
+                s.add(Video(original_filename="v.mp4", raw_path="/tmp/v.mp4", md5_hash="av",
+                            status=VideoStatus.processed, effect_preset="clean_natural", audio_track="hit"))
+                s.add(EffectPreset(name="clean_natural", ffmpeg_filter="eq=1"))
+                s.add(AudioTrack(name="hit", file_path="/tmp/hit.mp3"))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "a1"))).scalar_one()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "av"))).scalar_one()
+                import datetime as dt
+
+                s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.posted,
+                           posted_at=dt.datetime.now(dt.timezone.utc),
+                           views_7d=100, likes_7d=10, comments_7d=2, engagement_rate=12.0))
+                await s.commit()
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(seed())
+        ov = c.get("/api/v1/analytics/overview?days=30").json()
+        assert ov["total_posts"] == 1 and ov["total_views"] == 100
+        assert c.get("/api/v1/analytics/overview?days=-5").status_code == 422
+        assert len(c.get("/api/v1/analytics/accounts").json()) == 1
+        eff = c.get("/api/v1/analytics/effects").json()
+        assert eff[0]["posts"] == 1 and eff[0]["views"] == 100
+        aud = c.get("/api/v1/analytics/audio").json()
+        assert aud[0]["posts"] == 1
+        assert len(c.get("/api/v1/analytics/posts?limit=10").json()) == 1
+        assert c.get("/api/v1/analytics/posts?limit=-3").status_code == 422
+        assert len(c.get("/api/v1/analytics/time-slots").json()) >= 0
+        csv = c.get("/api/v1/analytics/export")
+        assert csv.status_code == 200 and "audio_track" in csv.text and "hit" in csv.text
+        assert isinstance(c.get("/api/v1/logs?limit=10").json(), list)
+        assert c.get("/api/v1/logs/stats").status_code == 200
+        assert c.get("/api/v1/logs?level=BOGUS").status_code == 400
+        assert c.delete("/api/v1/logs?older_than_days=-1").status_code == 422
+        assert c.delete("/api/v1/logs?older_than_days=0").status_code == 204
+        st = c.get("/api/v1/settings").json()
+        assert any(s["key"] == "pool_country" for s in st)
+        assert c.put("/api/v1/settings/pool_country", json={"value": "DE"}).json()["value"] == "DE"
+        assert c.put("/api/v1/settings/nope_nada", json={"value": "x"}).status_code == 404
+        assert c.put("/api/v1/settings/pool_country", json={"value": "x" * 6000}).status_code == 422
+
+    def test_preview_thumbnail_404(self, client):
+        c, _, _ = client
+        assert c.get("/api/v1/videos/999999/preview").status_code == 404
+        assert c.get("/api/v1/videos/999999/thumbnail").status_code == 404
+
+    def test_delete_video_with_posts_guarded(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            import datetime as dt
+
+            async with maker() as s:
+                s.add(Account(username="dv", password_enc="x"))
+                s.add(Video(original_filename="d.mp4", raw_path="/tmp/d.mp4",
+                            md5_hash="dv", status=VideoStatus.processed))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "dv"))).scalar_one()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "dv"))).scalar_one()
+                s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.posted,
+                           posted_at=dt.datetime.now(dt.timezone.utc)))
+                await s.commit()
+                return vid.id
+
+        import asyncio
+
+        vid_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.delete(f"/api/v1/videos/{vid_id}")
+        assert r.status_code == 409, r.text
+        assert "post" in r.json()["detail"].lower()
+        # The video (and its history) survive the refused delete.
+        assert c.get(f"/api/v1/videos/{vid_id}").status_code == 200
+
+
+class TestAnalyticsNoZeroing:
+    def test_failed_lookup_keeps_good_stats(self, tmp_path, monkeypatch):
+        import datetime as dt
+        import random
+        import time
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        monkeypatch.setattr(random, "uniform", lambda a, b: 0)
+
+        import app.database as dbmod
+        from app.database import Base
+        from app.services.instagram_service import InstagramService
+        from app.tasks import periodic_tasks
+
+        engine = create_engine(f"sqlite:///{tmp_path}/ana.db")
+        Base.metadata.create_all(engine)
+        maker = sessionmaker(bind=engine)
+        monkeypatch.setattr(dbmod, "SyncSessionLocal", maker)
+        monkeypatch.setattr(InstagramService, "media_info", lambda self, u, m: {})
+        s = maker()
+        now = dt.datetime.now(dt.timezone.utc)
+        s.add(Account(username="ana", password_enc="x"))
+        s.add(Video(original_filename="a.mp4", raw_path="/tmp/a.mp4", md5_hash="ana1",
+                    status=VideoStatus.processed))
+        s.flush()
+        acc = s.execute(select(Account).where(Account.username == "ana")).scalar_one()
+        vid = s.execute(select(Video).where(Video.md5_hash == "ana1")).scalar_one()
+        acc.created_at = now - dt.timedelta(days=30)
+        s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.posted,
+                   posted_at=now - dt.timedelta(hours=2),
+                   views_7d=500, likes_7d=50, comments_7d=5, engagement_rate=11.0))
+        s.commit()
+        out = periodic_tasks.fetch_all_analytics.apply().get()
+        assert out.get("updated") == 0
+        p = s.execute(select(Post)).scalars().all()[0]
+        assert (p.views_7d, p.likes_7d, p.engagement_rate) == (500, 50, 11.0)
+
+
+class TestPostingPipeline:
+    """Full beat->execute posting flow with celery eager + mocked IG upload.
+
+    No network, no redis, no worker: proves claim single-flight, archiving,
+    counters, stale handling and no-duplicate ticks end to end.
+    """
+
+    def _setup(self, tmp_path, monkeypatch):
+        import datetime as dt
+        import random
+        import subprocess
+        import time
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        import app.database as dbmod
+        from app.database import Base
+        from app.services.instagram_service import InstagramService
+        from app.tasks import celery_app
+
+        vid_src = str(tmp_path / "post.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", vid_src], check=True)
+        engine = create_engine(f"sqlite:///{tmp_path}/pipe.db")
+        Base.metadata.create_all(engine)
+        maker = sessionmaker(bind=engine)
+        monkeypatch.setattr(dbmod, "SyncSessionLocal", maker)
+        monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path / "media"))
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        monkeypatch.setattr(random, "uniform", lambda a, b: 0)
+        monkeypatch.setattr(random, "randint", lambda a, b: 0)
+        celery_app.celery.conf.task_always_eager = True
+        self.calls = []
+
+        outer = self
+
+        def fake_upload(_self, username, password, video_path, caption,
+                        trial=False, trial_strategy="manual"):
+            outer.calls.append((username, video_path, trial))
+            if outer.fail_with is not None:
+                return None, None, outer.fail_with
+            return "mid1", "https://www.instagram.com/reel/AAA/", ""
+
+        monkeypatch.setattr(InstagramService, "upload_reel", fake_upload)
+        self.fail_with = None
+        s = maker()
+        now = dt.datetime.now(dt.timezone.utc)
+        s.add(Account(username="pipe", password_enc="x", max_daily_posts=3))
+        s.add(Video(original_filename="p.mp4", raw_path=vid_src, processed_path=vid_src,
+                    md5_hash="pipe1", status=VideoStatus.processed))
+        s.add(ScheduleRule(name="tick", day_of_week=-1, hour=now.hour, minute=now.minute))
+        old = now - dt.timedelta(days=30)
+        s.flush()
+        acc = s.execute(select(Account).where(Account.username == "pipe")).scalar_one()
+        acc.created_at = old
+        s.commit()
+        return maker
+
+    def test_happy_path_no_duplicates(self, tmp_path, monkeypatch):
+        from app.models import Post, PostStatus, Video, VideoStatus
+        from app.tasks.post_tasks import check_and_post
+
+        maker = self._setup(tmp_path, monkeypatch)
+        r1 = check_and_post.apply().get()
+        assert r1["created"] == 1 and r1["fired"] == 1, r1
+        s = maker()
+        posts = s.execute(select(Post)).scalars().all()
+        assert len(posts) == 1 and posts[0].status == PostStatus.posted
+        assert posts[0].ig_media_id == "mid1"
+        vid = s.execute(select(Video).where(Video.md5_hash == "pipe1")).scalar_one()
+        assert vid.status == VideoStatus.posted
+        acc = s.execute(select(Account).where(Account.username == "pipe")).scalar_one()
+        assert (acc.posts_today, acc.total_posts) == (1, 1) and acc.last_post is not None
+        assert self.calls and self.calls[0][0] == "pipe"
+        # Second tick: nothing processed left, no duplicates ever.
+        r2 = check_and_post.apply().get()
+        assert r2["created"] == 0
+        assert len(s.execute(select(Post)).scalars().all()) == 1
+
+    def test_failed_upload_keeps_video_requeueable(self, tmp_path, monkeypatch):
+        from app.models import Post, PostStatus
+        from app.tasks.post_tasks import check_and_post
+
+        maker = self._setup(tmp_path, monkeypatch)
+        self.fail_with = "generic: boom"
+        r1 = check_and_post.apply().get()
+        assert r1["created"] == 1 and r1["fired"] == 1
+        s = maker()
+        posts = s.execute(select(Post)).scalars().all()
+        assert len(posts) == 1 and posts[0].status == PostStatus.failed
+        assert "boom" in (posts[0].fail_reason or "")
+
+    def test_stale_video_fails_cleanly(self, tmp_path, monkeypatch):
+        import datetime as dt
+
+        from app.models import Post, PostStatus
+        from app.tasks.post_tasks import execute_post
+
+        maker = self._setup(tmp_path, monkeypatch)
+        s = maker()
+        acc = s.execute(select(Account).where(Account.username == "pipe")).scalar_one()
+        vid = s.execute(select(Video).where(Video.md5_hash == "pipe1")).scalar_one()
+        s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.scheduled,
+                   scheduled_for=dt.datetime.now(dt.timezone.utc)))
+        s.commit()
+        pid = s.execute(select(Post)).scalars().all()[0].id
+        # Bypass the ORM (which would nullify the FK and hit NOT NULL):
+        # raw-SQL delete leaves a genuinely dangling post.video_id, exactly
+        # what the executor's stale guard is for.
+        from sqlalchemy import text
+
+        s.execute(text("DELETE FROM videos WHERE id = :i"), {"i": vid.id})
+        s.commit()
+        out = execute_post.apply(args=[pid]).get()
+        assert out["status"] == "failed" and "video" in out["error"]
+
+    def test_breakdowns_grouped(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            import datetime as dt
+
+            async with maker() as s:
+                s.add(Account(username="g1", password_enc="x"))
+                for h, fx in (("g1", "fx_a"), ("g2", "fx_b")):
+                    s.add(Video(original_filename=f"{h}.mp4", raw_path=f"/tmp/{h}.mp4",
+                                md5_hash=h, status=VideoStatus.processed, effect_preset=fx))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "g1"))).scalar_one()
+                for h, views in (("g1", 10), ("g2", 90)):
+                    vid = (await s.execute(select(Video).where(Video.md5_hash == h))).scalar_one()
+                    s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.posted,
+                               posted_at=dt.datetime.now(dt.timezone.utc),
+                               views_7d=views, engagement_rate=float(views)))
+                s.add(EffectPreset(name="fx_a", ffmpeg_filter="eq=1"))
+                s.add(EffectPreset(name="fx_b", ffmpeg_filter="eq=2"))
+                s.add(EffectPreset(name="fx_zero", ffmpeg_filter="eq=3"))
+                await s.commit()
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(seed())
+        rows = {r["name"]: r for r in c.get("/api/v1/analytics/effects").json()}
+        assert rows["fx_a"]["views"] == 10 and rows["fx_b"]["views"] == 90
+        assert rows["fx_zero"]["posts"] == 0 and rows["fx_zero"]["views"] == 0

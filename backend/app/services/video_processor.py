@@ -139,6 +139,9 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
         else:
             log.warning("Audio track '%s' unresolvable at encode time — proceeding silent", audio_choice)
 
+    # Post-trim output length drives music looping, progress parsing,
+    # thumbnail seek and the stored duration — never the raw probe length.
+    out_len = effective_output_duration(info["duration"], trim_start, trim_end)
     out_name = f"{uuid.uuid4().hex}.mp4"
     dst = os.path.join(dirs["processed"], out_name)
     watermark = default_watermark() if add_watermark else None
@@ -153,18 +156,18 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
         trending_audio=audio_path,
         music_volume=audio_vol,
         duck_original=audio_duck,
-        loop_audio_to=effective_output_duration(info["duration"], trim_start, trim_end),
+        loop_audio_to=out_len,
     )
 
     def on_progress(pct: float, stage: str):
         set_progress_sync(video_id, 8 + pct * 0.85, stage)
 
-    ff.run_sync_with_progress(cmd, info["duration"], on_progress)
+    ff.run_sync_with_progress(cmd, out_len or info["duration"], on_progress)
 
     thumb_name = f"{uuid.uuid4().hex}.jpg"
     thumb_path = os.path.join(dirs["thumbnails"], thumb_name)
     try:
-        extract_thumbnail_sync(dst, info["duration"], thumb_path)
+        extract_thumbnail_sync(dst, out_len, thumb_path)
     except Exception:
         log.warning("Thumbnail extraction failed for video %s", video_id)
         thumb_path = None
@@ -175,7 +178,7 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
         if video:
             video.processed_path = dst
             video.thumbnail_path = thumb_path
-            video.duration = info["duration"]
+            video.duration = out_len
             video.file_size = os.path.getsize(dst)
             video.processed_at = dt.datetime.now(dt.timezone.utc)
             video.status = VideoStatus.processed

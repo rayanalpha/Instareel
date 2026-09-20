@@ -14,14 +14,14 @@ function Reel({
   username: string;
   onPick: () => void;
 }) {
-  const url = useBlobUrl("preview", video?.id ?? null);
+  const { url, failed } = useBlobUrl("preview", video?.id ?? null);
   return (
     <div className="relative h-full w-full shrink-0 snap-start snap-always bg-black">
       {url ? (
         <video src={url} className="h-full w-full object-contain" controls playsInline preload="metadata" />
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-          {video ? "Loading…" : "No file yet"}
+          {!video ? "No file yet" : failed ? "Unavailable — reprocess the video" : "Loading…"}
         </div>
       )}
       <button onClick={onPick} className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3 pt-8 text-left text-white">

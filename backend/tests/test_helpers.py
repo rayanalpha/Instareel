@@ -1291,6 +1291,22 @@ class TestTrialUpload:
         # First attempt trial, fallback regular — exactly two uploads, one post.
         assert clips[0].get("trial") is True and clips[1] == {}
 
+    def test_idless_upload_never_marked_posted(self, monkeypatch):
+        import instagrapi
+
+        svc = self._svc(monkeypatch)
+
+        class Ghost(_FakeIGClient):
+            def clip_upload(self, path, caption="", **kw):
+                from types import SimpleNamespace
+
+                self.calls.append(("clip", dict(kw)))
+                return SimpleNamespace()  # no id/pk/code
+
+        monkeypatch.setattr(instagrapi, "Client", Ghost)
+        mid, url, err = svc.upload_reel("u", "p", "v.mp4", "cap")
+        assert mid is None and url is None and err.startswith("generic")
+
     def test_non_trial_error_no_fallback(self, monkeypatch):
         import instagrapi
 
@@ -1362,6 +1378,179 @@ class TestScheduleAutofill:
                 await engine.dispose()
 
         asyncio.run(go())
+
+
+class TestSchedulerEdges:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def test_due_rules_matching(self):
+        import datetime as dt
+
+        from app.models import ScheduleRule
+        from app.tasks import sync_helpers as sched
+
+        s = self._session()
+        now = dt.datetime.now(dt.timezone.utc)
+        s.add_all([
+            ScheduleRule(name="every", day_of_week=-1, hour=now.hour, minute=now.minute),
+            ScheduleRule(name="off", day_of_week=-1, hour=now.hour, minute=now.minute, is_active=False),
+            ScheduleRule(name="other-hour", day_of_week=-1,
+                         hour=(now.hour + 5) % 24, minute=now.minute),
+        ])
+        s.commit()
+        assert [r.name for r in sched.due_rules(s, now)] == ["every"]
+
+    def test_next_video_preference_and_fallback(self):
+        from app.models import Video, VideoStatus
+        from app.tasks import sync_helpers as sched
+
+        s = self._session()
+        s.add_all([
+            Video(original_filename="o.mp4", raw_path="/tmp/o.mp4", md5_hash="n1",
+                  status=VideoStatus.processed, effect_preset="plain"),
+            Video(original_filename="n.mp4", raw_path="/tmp/n.mp4", md5_hash="n2",
+                  status=VideoStatus.processed, effect_preset="cine"),
+        ])
+        s.commit()
+
+        def _preset(effect):
+            v = sched.next_video(s, effect)
+            assert v is not None
+            return v.effect_preset
+
+        assert _preset("cine") == "cine"
+        assert _preset("nope") == "plain"
+        assert _preset(None) == "plain"
+
+    def test_already_scheduled_window(self):
+        import datetime as dt
+
+        from app.models import Account, Post, PostStatus, ScheduleRule, Video, VideoStatus
+        from app.tasks import sync_helpers as sched
+
+        s = self._session()
+        s.add(Account(username="w1", password_enc="x"))
+        s.add(Video(original_filename="w.mp4", raw_path="/tmp/w.mp4", md5_hash="w1",
+                    status=VideoStatus.processed))
+        s.add(ScheduleRule(name="r", day_of_week=-1, hour=1, minute=2, account_id=1))
+        s.flush()
+        s.add(Post(video_id=1, account_id=1, status=PostStatus.scheduled,
+                   scheduled_for=dt.datetime.now(dt.timezone.utc)))
+        s.commit()
+        rule = s.get(ScheduleRule, 1)
+        assert rule is not None
+        assert sched.already_scheduled(s, rule) is True
+        # video_already_queued keys on video_id (the post targets video 1):
+        assert sched.video_already_queued(s, 1) is True
+        assert sched.video_already_queued(s, 999) is False
+
+    def test_pick_hashtags_blank_safe(self):
+        # Schema is NOT NULL, so None is unconstructible — whitespace-only
+        # rows are the real-world empty case (plus the None-tolerant guard).
+        from app.models import HashtagSet
+        from app.tasks import sync_helpers as sched
+
+        s = self._session()
+        s.add(HashtagSet(name="empty", tags="  "))
+        s.add(HashtagSet(name="commas", tags=",, ,"))
+        s.commit()
+        assert sched.pick_hashtags(s) == ""
+        s.add(HashtagSet(name="good", tags="#a, #b, #c, #d"))
+        s.commit()
+        got = sched.pick_hashtags(s)
+        assert 3 <= len(got.split()) <= 5 and all(t.startswith("#") for t in got.split())
+
+    def test_eligible_defers_warm_account(self):
+        import datetime as dt
+
+        from app.models import Account, AccountStatus
+        from app.tasks import sync_helpers as sched
+
+        s = self._session()
+        now = dt.datetime.now(dt.timezone.utc)
+        young = Account(username="young", password_enc="x", posts_today=1, max_daily_posts=3)
+        old = Account(username="old", password_enc="x", posts_today=0, max_daily_posts=3)
+        s.add_all([young, old])
+        s.flush()
+        # Backdate created_at past warm-up for the old one.
+        old.created_at = now - dt.timedelta(days=30)
+        s.commit()
+        pick = sched.eligible_account(s, None)
+        assert pick is not None and pick.username == "old"
+
+    def test_as_aware_utc(self):
+        import datetime as dt
+
+        from app.tasks.sync_helpers import as_aware_utc
+
+        assert as_aware_utc(None) is None
+        naive = dt.datetime(2026, 1, 1, 12, 0)
+        out = as_aware_utc(naive)
+        assert out is not None and out.tzinfo == dt.timezone.utc
+        aware = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
+        assert as_aware_utc(aware) == aware
+
+    def test_media_dirs_created(self, tmp_path, monkeypatch):
+        from app.config import settings
+        from app.services.video_processor import media_dirs
+
+        monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path / "m"))
+        dirs = media_dirs()
+        assert all(os.path.isdir(v) for v in dirs.values())
+        assert set(dirs) >= {"raw", "processed", "thumbnails", "watermarks", "audio", "profile_pics"}
+
+
+class TestSecurityUnits:
+    def test_jwt_cycle_and_rejections(self):
+        import datetime as dt
+
+        import jwt
+
+        from app.config import settings
+        from app.core.security import create_access_token, create_refresh_token, decode_token
+
+        tok = create_access_token("admin")
+        assert decode_token(tok) == "admin"
+        ref = create_refresh_token("admin")
+        assert decode_token(ref, expected_type="refresh") == "admin"
+        try:
+            decode_token(ref)
+            raise AssertionError("must reject")
+        except ValueError as e:
+            assert "type" in str(e).lower()
+        expired = jwt.encode(
+            {"sub": "x", "type": "access", "exp": dt.datetime(2000, 1, 1)},
+            settings.SECRET_KEY, algorithm="HS256")
+        try:
+            decode_token(expired)
+            raise AssertionError("must reject")
+        except ValueError as e:
+            assert "expired" in str(e).lower()
+        nosub = jwt.encode({"type": "access"}, settings.SECRET_KEY, algorithm="HS256")
+        try:
+            decode_token(nosub)
+            raise AssertionError("must reject")
+        except ValueError:
+            pass
+
+    def test_password_and_legacy_decrypt(self):
+        from app.core.security import decrypt_secret, encrypt_secret, hash_password, verify_password
+
+        h = hash_password("pw")
+        assert verify_password("pw", h) is True
+        assert verify_password("nope", h) is False
+        assert verify_password("pw", "not-a-hash") is False
+        assert decrypt_secret(encrypt_secret("s3")) == "s3"
+        assert decrypt_secret("plaintext-legacy") == "plaintext-legacy"
+        assert decrypt_secret(None) is None and encrypt_secret(None) is None
 
 
 class TestCrypto:

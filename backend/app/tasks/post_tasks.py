@@ -202,12 +202,20 @@ def execute_post(self, post_id: int):
 
         # Re-verify after the sleep: the admin may have deleted the post or
         # moved it out of 'posting' while we waited — never upload then.
+        # The proxy is re-resolved too: it may have died during the sleep.
         with SyncSessionLocal() as s:
             post = s.get(Post, post_id)
             if post is None:
                 return {"post_id": post_id, "status": "missing"}
             if post.status != PostStatus.posting:
                 return {"post_id": post_id, "status": "already-handled"}
+            account = s.get(Account, post.account_id)
+            if account is None:
+                set_status(PostStatus.failed, fail_reason="Stale reference: missing account")
+                return {"post_id": post_id, "status": "failed", "error": "missing account"}
+            _proxy = sched.resolve_proxy(s, account)
+            proxy_url = proxy_url_for(_proxy)
+            proxy_id = _proxy.id if _proxy is not None else None
 
         svc = InstagramService(proxy_url=proxy_url, session_path=session_path_for(username, settings.MEDIA_ROOT))
         full_caption = (caption + "\n" + tags).strip()

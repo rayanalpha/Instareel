@@ -40,11 +40,20 @@ interface PhoneState {
   setCurrentAccountId: (id: number | null) => void;
 }
 
+function storedAccountId(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(CURRENT_ACCOUNT_KEY);
+  if (raw === null) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    localStorage.removeItem(CURRENT_ACCOUNT_KEY);
+    return null;
+  }
+  return n;
+}
+
 export const usePhone = create<PhoneState>((set) => ({
-  currentAccountId:
-    typeof window !== "undefined" && localStorage.getItem(CURRENT_ACCOUNT_KEY)
-      ? Number(localStorage.getItem(CURRENT_ACCOUNT_KEY))
-      : null,
+  currentAccountId: storedAccountId(),
   setCurrentAccountId: (id) => {
     if (id === null) localStorage.removeItem(CURRENT_ACCOUNT_KEY);
     else localStorage.setItem(CURRENT_ACCOUNT_KEY, String(id));

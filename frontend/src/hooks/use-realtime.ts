@@ -33,6 +33,7 @@ export function useRealtimeFeed(enabled: boolean) {
     if (!enabled || typeof window === "undefined") return;
     let ws: WebSocket | null = null;
     let closed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
       const token = localStorage.getItem("access_token");
@@ -74,13 +75,14 @@ export function useRealtimeFeed(enabled: boolean) {
       ws.onclose = () => {
         if (closed) return;
         tries.current += 1;
-        setTimeout(connect, Math.min(15000, 1000 * 2 ** tries.current));
+        retryTimer = setTimeout(connect, Math.min(15000, 1000 * 2 ** tries.current));
       };
     };
 
     connect();
     return () => {
       closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       ws?.close();
     };
   }, [enabled, qc]);

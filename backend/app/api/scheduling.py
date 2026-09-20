@@ -46,9 +46,15 @@ async def create_rule(body: ScheduleRuleIn, _: str = Depends(get_current_admin),
 
 @schedule_router.put("/{rule_id}", response_model=ScheduleRuleOut)
 async def update_rule(rule_id: int, body: ScheduleRuleIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from app.models import Account, CaptionTemplate
+
     r = await db.get(ScheduleRule, rule_id)
     if not r:
         raise HTTPException(404, "Rule not found")
+    if body.account_id is not None and await db.get(Account, body.account_id) is None:
+        raise HTTPException(404, "Account not found")
+    if body.caption_template_id is not None and await db.get(CaptionTemplate, body.caption_template_id) is None:
+        raise HTTPException(404, "Caption template not found")
     for k, v in body.model_dump().items():
         setattr(r, k, v)
     await db.commit()

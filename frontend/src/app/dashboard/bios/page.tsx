@@ -99,7 +99,9 @@ export default function BiosPage() {
               </p>
               {b.full_name && <p className="mt-1 text-sm font-medium">{b.full_name}</p>}
               <p className="mt-1 whitespace-pre-wrap text-sm">{b.text}</p>
-              {b.link_url && <a href={b.link_url} target="_blank" className="text-sm text-sky-500 hover:underline">{b.link_url}</a>}
+              {b.link_url && (/^https?:\/\//i.test(b.link_url)
+                ? <a href={b.link_url} target="_blank" rel="noreferrer" className="text-sm text-sky-500 hover:underline">{b.link_url}</a>
+                : <span className="text-sm text-zinc-500">{b.link_url}</span>)}
               <p className="mt-1 text-xs text-zinc-500">
                 Privacy: {b.make_private === null || b.make_private === undefined ? "leave as-is" : b.make_private ? "private" : "public"}
                 {" · "}Picture: {b.has_picture ? "set" : "none"}

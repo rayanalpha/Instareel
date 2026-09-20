@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header, MobileNav, Sidebar, TopBar } from "@/components/layout";
 import { Toaster } from "@/components/toast";
+import { Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/stores/stores";
 import { useRealtimeFeed } from "@/hooks/use-realtime";
@@ -11,6 +12,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const { setAuth } = useAuth();
   const [mounted, setMounted] = useState(false);
+  const [verified, setVerified] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -24,6 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     api.get("/auth/me").then(
       () => {
         if (!useAuth.getState().username) setAuth(localStorage.getItem("username") ?? "admin");
+        setVerified(true);
       },
       () => router.replace("/login"),
     );
@@ -33,9 +36,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Only read localStorage after mount so the server-rendered HTML (empty)
   // matches the first client render — avoids React hydration mismatches.
   const token = mounted ? localStorage.getItem("access_token") : null;
-  useRealtimeFeed(!!token);
+  useRealtimeFeed(!!token && verified);
 
   if (!mounted || !token) return null;
+  if (!verified) return <div className="flex min-h-screen items-center justify-center"><Spinner /></div>;
 
   return (
     <div className="flex min-h-screen">

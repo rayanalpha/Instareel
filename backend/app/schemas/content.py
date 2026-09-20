@@ -1,6 +1,7 @@
 import datetime as dt
+import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ScheduleRuleIn(BaseModel):
@@ -48,6 +49,18 @@ class BioIn(BaseModel):
     text: str = Field(min_length=1)
     link_url: str = ""
     full_name: str = Field(default="", max_length=128)
+
+    @field_validator("link_url")
+    @classmethod
+    def _safe_link(cls, v: str) -> str:
+        s = (v or "").strip()
+        if s and not s.lower().startswith(("http://", "https://")):
+            # Bare domains (t.me/...) render relative and broken — normalize.
+            # Dangerous schemes never pass through to the rendered <a href>.
+            if re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+(/.*)?$", s, re.IGNORECASE):
+                return "https://" + s
+            raise ValueError("link_url must be an http(s) URL")
+        return s
     make_private: bool | None = None
     is_active: bool = True
     rotation_interval_days: int = Field(default=14, ge=1, le=365)

@@ -28,8 +28,10 @@ function loadBlob(key: string, url: string): Promise<string> {
   return p;
 }
 
-/** Authenticated media URL for <img>/<video> tags (preview or thumbnail). */
-export function useBlobUrl(kind: "preview" | "thumbnail", id: number | null): string | null {
+/** Authenticated media for <img>/<video> tags (preview or thumbnail).
+ * Tri-state: url set = ready, failed = gave up (show placeholder, no spin),
+ * neither = still loading. */
+export function useBlobUrl(kind: "preview" | "thumbnail", id: number | null): { url: string | null; failed: boolean } {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -38,6 +40,7 @@ export function useBlobUrl(kind: "preview" | "thumbnail", id: number | null): st
       return;
     }
     let cancelled = false;
+    setUrl(null);
     setFailed(false);
     loadBlob(`${kind}:${id}`, `/videos/${id}/${kind}`).then(
       (u) => {
@@ -51,6 +54,5 @@ export function useBlobUrl(kind: "preview" | "thumbnail", id: number | null): st
       cancelled = true;
     };
   }, [kind, id]);
-  if (failed) return null;
-  return url;
+  return { url, failed };
 }

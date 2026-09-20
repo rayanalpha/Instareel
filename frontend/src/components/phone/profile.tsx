@@ -26,10 +26,14 @@ function GridThumb({
   badge?: "scheduled" | "trial" | null;
   onPick: () => void;
 }) {
-  const url = useBlobUrl("thumbnail", videoId);
+  const { url, failed } = useBlobUrl("thumbnail", videoId);
   return (
     <button onClick={onPick} className="relative aspect-square w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-      {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : null}
+      {url ? (
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : failed ? (
+        <span className="flex h-full items-center justify-center text-lg text-zinc-400">▦</span>
+      ) : null}
       {badge === "scheduled" && (
         <span className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white" title="Scheduled">
           <Clock className="h-3 w-3" />
@@ -140,11 +144,13 @@ export function PhoneProfile({
       <div className="px-4 pb-2 pt-1 text-[13px]">
         <p className="font-semibold">{displayName}</p>
         {biography && <p className="whitespace-pre-wrap">{biography}</p>}
-        {link && (
-          <a href={link} target="_blank" className="text-sky-600 dark:text-sky-400">
+        {link && (/^https?:\/\//i.test(link) ? (
+          <a href={link} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400">
             {link}
           </a>
-        )}
+        ) : (
+          <span className="text-zinc-500">{link}</span>
+        ))}
         {bio === null && <p className="text-zinc-500">No profile config — create one in Bios.</p>}
         {liveFailed && <p className="text-xs text-amber-600">Live data unavailable (session/proxy).</p>}
       </div>

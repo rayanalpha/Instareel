@@ -62,7 +62,7 @@ def fetch_all_analytics():
                     acc = s.get(Account, acc_id)
                     if not acc:
                         continue
-                    if sched.account_age_days(acc.created_at) < sched.BIO_MIN_AGE_DAYS:
+                    if sched.account_age_days(acc.created_at) < sched.ANALYTICS_MIN_AGE_DAYS:
                         continue
                     if not sched.account_reachable(s, acc):
                         continue
@@ -72,6 +72,10 @@ def fetch_all_analytics():
                     proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT)
                 )
                 info = svc.media_info(username, media_id)
+                if not info:
+                    # Failed lookup returns {} — never let it zero out good stats.
+                    log.warning("analytics: no data for post %s, keeping previous values", pid)
+                    continue
                 likes = info.get("like_count", 0)
                 comments = info.get("comment_count", 0)
                 views = info.get("view_count", 0)
@@ -150,8 +154,6 @@ def check_bio_rotation():
                     username = acc.username
                     password = decrypt_secret(acc.password_enc)
                     purl = sched.resolve_proxy_url(s, acc)
-                # Same egress IP as posts — bio edits from a different IP than
-                # uploads is an easy automation tell.
                 svc = InstagramService(
                     proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT)
                 )

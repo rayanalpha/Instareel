@@ -32,6 +32,7 @@ export default function VideoDetailPage() {
   const [nowState, setNowState] = useState<{ status: string; url?: string; error?: string } | null>(null);
 
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
   async function load() {
     const { data } = await api.get(`/videos/${id}`);
     setLoadError("");
@@ -53,30 +54,37 @@ export default function VideoDetailPage() {
   }
 
   // Poll only while the video is in a transitional state; stop on error.
+  // Guarded against overlap: a slow load() never piles up concurrent polls.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    let inflight = false;
     const stop = () => {
       if (timer) {
         clearInterval(timer);
         timer = null;
       }
     };
+    const tick = async () => {
+      if (inflight || cancelled) return;
+      inflight = true;
+      try {
+        const cur = await load();
+        if (DONE_STATES.has(cur.status)) stop();
+      } catch {
+        if (!cancelled) {
+          setLoadError("Failed to load video — retrying stopped.");
+          stop();
+        }
+      } finally {
+        inflight = false;
+      }
+    };
     (async () => {
       try {
         const v = await load();
         if (!cancelled && !DONE_STATES.has(v.status)) {
-          timer = setInterval(async () => {
-            try {
-              const cur = await load();
-              if (DONE_STATES.has(cur.status)) stop();
-            } catch {
-              if (!cancelled) {
-                setLoadError("Failed to load video — retrying stopped.");
-                stop();
-              }
-            }
-          }, 4000);
+          timer = setInterval(tick, 4000);
         }
       } catch {
         if (!cancelled) setLoadError("Failed to load video.");
@@ -192,11 +200,20 @@ export default function VideoDetailPage() {
           <button
             className="btn-primary mt-3 w-full"
             disabled={process.isPending}
-            onClick={async () => { await process.mutateAsync({ url: `/videos/${id}/process` }); load(); }}
+            onClick={async () => {
+              setActionError("");
+              try {
+                await process.mutateAsync({ url: `/videos/${id}/process` });
+                load();
+              } catch {
+                setActionError("Could not queue processing.");
+              }
+            }}
           >
             {process.isPending ? "Queuing…" : "Start processing"}
           </button>
         )}
+        {actionError && <p className="mt-2 text-sm text-red-500">{actionError}</p>}
         {video.failed_reason && <p className="mt-2 text-sm text-red-500">{video.failed_reason}</p>}
       </Card>
 
@@ -248,19 +265,24 @@ export default function VideoDetailPage() {
               className="btn-primary flex-1"
               disabled={save.isPending}
               onClick={async () => {
-                await save.mutateAsync({
-                  url: `/videos/${id}/settings`,
-                  body: {
-                    effect_preset: form.effect_preset || null,
-                    audio_track: form.audio_track || null,
-                    is_trial: form.is_trial,
-                    trial_strategy: form.trial_strategy,
-                    trim_start: form.trim_start ? Number(form.trim_start) : null,
-                    trim_end: form.trim_end ? Number(form.trim_end) : null,
-                    add_watermark: form.add_watermark,
-                  },
-                });
-                load();
+                setActionError("");
+                try {
+                  await save.mutateAsync({
+                    url: `/videos/${id}/settings`,
+                    body: {
+                      effect_preset: form.effect_preset || null,
+                      audio_track: form.audio_track || null,
+                      is_trial: form.is_trial,
+                      trial_strategy: form.trial_strategy,
+                      trim_start: form.trim_start ? Number(form.trim_start) : null,
+                      trim_end: form.trim_end ? Number(form.trim_end) : null,
+                      add_watermark: form.add_watermark,
+                    },
+                  });
+                  load();
+                } catch {
+                  setActionError("Could not save settings.");
+                }
               }}
             >
               Save settings
@@ -268,7 +290,15 @@ export default function VideoDetailPage() {
             <button
               className="btn-ghost flex-1"
               disabled={process.isPending}
-              onClick={async () => { await process.mutateAsync({ url: `/videos/${id}/reprocess` }); load(); }}
+              onClick={async () => {
+                setActionError("");
+                try {
+                  await process.mutateAsync({ url: `/videos/${id}/reprocess` });
+                  load();
+                } catch {
+                  setActionError("Could not queue re-processing.");
+                }
+              }}
             >
               Re-process
             </button>
@@ -280,12 +310,17 @@ export default function VideoDetailPage() {
                 disabled={postNow.isPending || nowState?.status === "scheduled" || nowState?.status === "posting"}
                 onClick={async () => {
                   setNowState(null);
-                  const res = await postNow.mutateAsync({
-                    url: "/posts/schedule",
-                    body: { video_id: Number(id), is_trial: form.is_trial },
-                  });
-                  setNowPostId((res as { id: number }).id);
-                  setNowState({ status: "scheduled" });
+                  setActionError("");
+                  try {
+                    const res = await postNow.mutateAsync({
+                      url: "/posts/schedule",
+                      body: { video_id: Number(id), is_trial: form.is_trial },
+                    });
+                    setNowPostId((res as { id: number }).id);
+                    setNowState({ status: "scheduled" });
+                  } catch {
+                    setActionError("Could not schedule post (already queued?).");
+                  }
                 }}
               >
                 {postNow.isPending ? "Queuing…" : "Post now"}

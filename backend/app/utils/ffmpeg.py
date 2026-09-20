@@ -140,14 +140,24 @@ def build_command(
         music_idx = next_idx
         cmd += ["-i", music]
         next_idx += 1
+    lavfi_idx: int | None = None
+    if not music and not has_audio:
+        # Silent track input is appended here (not in audio_args) so its
+        # index is known for the -map below. Without a map the stream is
+        # dropped whenever any other -map exists (video-only output).
+        cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+        lavfi_idx = next_idx
+        next_idx += 1
 
     audio_args: list[str]
     if use_mix and music_idx is not None:
+        # loudnorm lives INSIDE the graph: a stream fed from -filter_complex
+        # cannot also take -af (ffmpeg rejects mixing simple+complex filters).
         filter_complex += (
             f";[{music_idx}:a]volume={vol}[a1]"
-            f";[0:a][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            f";[0:a][a1]amix=inputs=2:duration=first:dropout_transition=0,loudnorm[aout]"
         )
-        audio_args = ["-map", "[aout]", "-c:a", "aac", "-b:a", "128k", "-af", "loudnorm"]
+        audio_args = ["-map", "[aout]", "-c:a", "aac", "-b:a", "128k"]
     elif music_idx is not None:
         # Trending track is the only audio (ducked original or silent video).
         audio_args = ["-map", f"{music_idx}:a", "-c:a", "aac", "-b:a", "128k",
@@ -157,7 +167,7 @@ def build_command(
     elif has_audio:
         audio_args = ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-af", "loudnorm"]
     else:
-        audio_args = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest", "-c:a", "aac"]
+        audio_args = ["-map", f"{lavfi_idx}:a", "-shortest", "-c:a", "aac"] if lavfi_idx is not None else []
 
     cmd += [
         "-filter_complex", filter_complex,

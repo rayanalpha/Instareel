@@ -137,7 +137,7 @@ class SystemLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     timestamp: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=dt.datetime.utcnow, index=True
+        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), index=True
     )
 
 
@@ -149,5 +149,7 @@ class Setting(Base):
     category: Mapped[str] = mapped_column(String(64), default="general")
     is_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.timezone.utc),
+        onupdate=lambda: dt.datetime.now(dt.timezone.utc),
     )

@@ -41,6 +41,11 @@ app.include_router(ws_mount)
 
 @app.on_event("startup")
 async def startup():
+    if settings.SECRET_KEY in ("change-me", "change-this-to-a-long-random-string", ""):
+        log.warning(
+            "SECRET_KEY is still the default — set a unique value in .env, "
+            "otherwise forged admin JWTs are trivial."
+        )
     os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
     for sub in ("raw", "processed", "thumbnails", "watermarks", "sessions", "audio", "profile_pics"):
         os.makedirs(os.path.join(settings.MEDIA_ROOT, sub), exist_ok=True)

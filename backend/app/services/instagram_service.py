@@ -168,7 +168,10 @@ class InstagramService:
             media_id = str(getattr(media, "id", "") or getattr(media, "pk", ""))
             code = getattr(media, "code", None)
             permalink = f"https://www.instagram.com/reel/{code}/" if code else None
-            return media_id or None, permalink, ""
+            if not media_id:
+                # Upload "succeeded" with no media id — must NOT be marked posted.
+                return None, None, "generic: upload returned no media id"
+            return media_id, permalink, ""
         except Exception as exc:
             kind = _classify(exc)
             return None, None, f"{kind}: {exc}"

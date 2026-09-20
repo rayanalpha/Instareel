@@ -4,13 +4,12 @@ import os
 import uuid
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin, get_db
+from app.api.deps import get_current_admin, get_db, limiter
 from app.core.security import decrypt_secret, encrypt_secret
-from app.database import SessionLocal
 from app.models import Account, AudioTrack, BioConfig, EffectPreset, Proxy, ProxyProtocol, ProxySource
 from app.schemas.account import ProxyCreate, ProxyOut, ProxyUpdate
 from app.schemas.content import (
@@ -73,6 +72,8 @@ async def update_bio(bid: int, body: BioIn, _: str = Depends(get_current_admin),
     b = await db.get(BioConfig, bid)
     if not b:
         raise HTTPException(404, "Bio not found")
+    if await db.get(Account, body.account_id) is None:
+        raise HTTPException(404, "Account not found")
     for k, v in body.model_dump().items():
         setattr(b, k, v)
     await db.commit()
@@ -91,7 +92,11 @@ async def delete_bio(bid: int, _: str = Depends(get_current_admin), db: AsyncSes
 
 
 @bio_router.post("/{bid}/apply")
-async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
+@limiter.limit("10/minute")
+async def apply_bio(
+    request: Request, bid: int, _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
     """Apply the full profile now: bio + link + full name + picture + privacy."""
     import concurrent.futures
 
@@ -99,25 +104,24 @@ async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
     from app.services.instagram_service import InstagramService
     from app.utils.instagram_helpers import session_path_for
 
-    async with SessionLocal() as db:
-        from app.tasks import sync_helpers as sched
+    from app.tasks import sync_helpers as sched
 
-        b = await db.get(BioConfig, bid)
-        if not b:
-            raise HTTPException(404, "Bio not found")
-        acc = await db.get(Account, b.account_id)
-        if not acc:
-            raise HTTPException(404, "Account not found")
-        if not sched.account_reachable(db, acc):
-            raise HTTPException(409, "No healthy proxy route for this account right now")
-        username, password = acc.username, decrypt_secret(acc.password_enc)
-        purl = sched.resolve_proxy_url(db, acc)
-        bio_text: str = b.text
-        link: str = b.link_url or ""
-        full_name: str = b.full_name or ""
-        make_private: bool | None = b.make_private
-        picture: str | None = b.profile_pic_path
-        acc_id = acc.id
+    b = await db.get(BioConfig, bid)
+    if not b:
+        raise HTTPException(404, "Bio not found")
+    acc = await db.get(Account, b.account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if not sched.account_reachable(db, acc):
+        raise HTTPException(409, "No healthy proxy route for this account right now")
+    username, password = acc.username, decrypt_secret(acc.password_enc)
+    purl = sched.resolve_proxy_url(db, acc)
+    bio_text: str = b.text
+    link: str = b.link_url or ""
+    full_name: str = b.full_name or ""
+    make_private: bool | None = b.make_private
+    picture: str | None = b.profile_pic_path
+    acc_id = acc.id
     svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         err = pool.submit(
@@ -127,11 +131,10 @@ async def apply_bio(bid: int, _: str = Depends(get_current_admin)):
         ).result(timeout=180)
     if err:
         raise HTTPException(502, f"Profile apply failed: {err}")
-    async with SessionLocal() as db:
-        b = await db.get(BioConfig, bid)
-        if b:
-            b.last_applied = dt.datetime.now(dt.timezone.utc)
-            await db.commit()
+    b = await db.get(BioConfig, bid)
+    if b:
+        b.last_applied = dt.datetime.now(dt.timezone.utc)
+        await db.commit()
     await log_event("INFO", "account", f"Profile force-applied to account {acc_id}", {"bio_id": bid})
     return {"ok": True}
 
@@ -141,7 +144,9 @@ MAX_PIC_BYTES = 10 * 1024 * 1024
 
 
 @bio_router.post("/{bid}/picture", response_model=BioOut)
+@limiter.limit("10/minute")
 async def upload_bio_picture(
+    request: Request,
     bid: int,
     file: UploadFile = File(...),
     _: str = Depends(get_current_admin),
@@ -216,7 +221,10 @@ async def delete_bio_picture(bid: int, _: str = Depends(get_current_admin), db: 
 
 
 @bio_router.get("/{bid}/current")
-async def bio_current(bid: int, _: str = Depends(get_current_admin)):
+async def bio_current(
+    bid: int, _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
     """Read-only IG-side profile snapshot to compare against the config."""
     import concurrent.futures
 
@@ -224,17 +232,16 @@ async def bio_current(bid: int, _: str = Depends(get_current_admin)):
     from app.services.instagram_service import InstagramService
     from app.utils.instagram_helpers import session_path_for
 
-    async with SessionLocal() as db:
-        from app.tasks import sync_helpers as sched
+    from app.tasks import sync_helpers as sched
 
-        b = await db.get(BioConfig, bid)
-        if not b:
-            raise HTTPException(404, "Bio not found")
-        acc = await db.get(Account, b.account_id)
-        if not acc:
-            raise HTTPException(404, "Account not found")
-        username = acc.username
-        purl = sched.resolve_proxy_url(db, acc)
+    b = await db.get(BioConfig, bid)
+    if not b:
+        raise HTTPException(404, "Bio not found")
+    acc = await db.get(Account, b.account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    username = acc.username
+    purl = sched.resolve_proxy_url(db, acc)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         try:
             data = pool.submit(
@@ -297,10 +304,14 @@ async def create_proxy(body: ProxyCreate, _: str = Depends(get_current_admin), d
 
 
 @proxy_router.post("/import")
+@limiter.limit("10/minute")
 async def import_proxies(
+    request: Request,
     file: UploadFile = File(...),
-    default_protocol: str = "http",
-    default_country: str = "",
+    # NOTE: plain `str = ...` params are query-only in FastAPI — multipart
+    # form fields REQUIRE Form() or they are silently dropped (proven by test).
+    default_protocol: str = Form("http"),
+    default_country: str = Form(""),
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -430,7 +441,8 @@ async def test_proxy(pid: int, _: str = Depends(get_current_admin), db: AsyncSes
 
 
 @proxy_router.post("/check-all")
-async def check_all(_: str = Depends(get_current_admin)):
+@limiter.limit("5/minute")
+async def check_all(request: Request, _: str = Depends(get_current_admin)):
     from app.tasks.periodic_tasks import check_all_proxies
 
     check_all_proxies.delay()
@@ -503,7 +515,8 @@ async def delete_source(sid: int, _: str = Depends(get_current_admin), db: Async
 
 
 @proxy_router.post("/pool/refresh")
-async def refresh_pool_now(_: str = Depends(get_current_admin)):
+@limiter.limit("5/minute")
+async def refresh_pool_now(request: Request, _: str = Depends(get_current_admin)):
     from app.tasks.periodic_tasks import refresh_proxy_pool
 
     refresh_proxy_pool.delay()
@@ -511,7 +524,8 @@ async def refresh_pool_now(_: str = Depends(get_current_admin)):
 
 
 @proxy_router.post("/pool/purge")
-async def purge_pool_now(_: str = Depends(get_current_admin)):
+@limiter.limit("5/minute")
+async def purge_pool_now(request: Request, _: str = Depends(get_current_admin)):
     import concurrent.futures
 
     from app.database import SyncSessionLocal
@@ -594,12 +608,14 @@ async def list_audio(_: str = Depends(get_current_admin), db: AsyncSession = Dep
 
 
 @audio_router.post("/upload", response_model=AudioOut, status_code=201)
+@limiter.limit("10/minute")
 async def upload_audio(
+    request: Request,
     file: UploadFile = File(...),
-    name: str = "",
-    description: str = "",
-    music_volume: float = 0.4,
-    duck_original: bool = False,
+    name: str = Form(""),
+    description: str = Form(""),
+    music_volume: float = Form(0.4),
+    duck_original: bool = Form(False),
     _: str = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
