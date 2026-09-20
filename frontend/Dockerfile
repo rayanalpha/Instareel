@@ -3,14 +3,20 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 
-# NEXT_PUBLIC_API_URL is baked at build time — pass it as a build arg
-# (compose does this from FRONTEND_API_URL); a runtime -e value alone is ignored.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 FROM node:20-alpine AS builder
 WORKDIR /app
+# Build-time only (both are baked into the bundle / routes manifest):
+# - NEXT_PUBLIC_API_URL: what the BROWSER calls. Empty = same-origin
+#   (nginx profile, recommended). Set to http://host:8000 only when exposing
+#   the frontend container directly.
+# - API_INTERNAL_URL: where the Next SERVER proxies /api/* (rewrites are
+#   resolved at build time) — must resolve inside compose network.
+ARG NEXT_PUBLIC_API_URL=
+ARG API_INTERNAL_URL=http://backend:8000
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
 RUN npm run build
 
 FROM node:20-alpine AS runner

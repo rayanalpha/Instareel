@@ -11,8 +11,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- With the nginx profile (`docker compose --profile nginx up --build`), the whole
-  stack is served on `${NGINX_PORT:-8080}`: `/` → frontend, `/api/*` + `/ws` → backend.
+- Default deploy is the nginx profile (`docker compose --profile nginx up --build -d`):
+  everything on `${NGINX_PORT:-8080}` — `/` → frontend, `/api/*` + `/ws` + docs → backend,
+  same-origin (no CORS). The frontend image is baked for this (empty
+  `NEXT_PUBLIC_API_URL`, internal rewrite to `http://backend:8000`).
+- Only set `FRONTEND_API_URL` when exposing the frontend container directly
+  (no nginx) — it is baked into the client bundle at build time.
 - API docs (`/docs`, `/openapi.json`) are reachable directly on the backend
   (`http://localhost:8000/docs` in local dev) or via the nginx profile.
 - Login with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.

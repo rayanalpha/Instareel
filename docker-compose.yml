@@ -85,7 +85,10 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-http://localhost:8000}
+        # Empty = same-origin via nginx (default path). Set FRONTEND_API_URL
+        # only when exposing this container's :3000 directly to browsers.
+        NEXT_PUBLIC_API_URL: ${FRONTEND_API_URL:-}
+        API_INTERNAL_URL: http://backend:8000
     restart: unless-stopped
     depends_on:
       - backend
