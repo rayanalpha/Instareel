@@ -8,7 +8,8 @@ import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
 
 interface Detail {
   id: number; original_filename: string; duration: number | null; status: string;
-  effect_preset: string | null; audio_track: string | null; add_watermark: boolean;
+  effect_preset: string | null; audio_track: string | null; is_trial: boolean;
+  trial_strategy: string; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
 }
 
@@ -21,7 +22,7 @@ export default function VideoDetailPage() {
   const [progress, setProgress] = useState<{ percentage: number; stage: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
-  const [form, setForm] = useState({ effect_preset: "", audio_track: "", trim_start: "", trim_end: "", add_watermark: true });
+  const [form, setForm] = useState({ effect_preset: "", audio_track: "", is_trial: false, trial_strategy: "manual", trim_start: "", trim_end: "", add_watermark: true });
   const { data: effects } = useEffects();
   const { data: audios } = useAudios();
   const save = useApiMutation("put", [["videos"]]);
@@ -35,6 +36,8 @@ export default function VideoDetailPage() {
     setForm({
       effect_preset: data.effect_preset ?? "",
       audio_track: data.audio_track ?? "",
+      is_trial: data.is_trial ?? false,
+      trial_strategy: data.trial_strategy ?? "manual",
       trim_start: data.trim_start?.toString() ?? "",
       trim_end: data.trim_end?.toString() ?? "",
       add_watermark: data.add_watermark,
@@ -187,6 +190,18 @@ export default function VideoDetailPage() {
             <input type="checkbox" checked={form.add_watermark} onChange={(e) => setForm({ ...form, add_watermark: e.target.checked })} />
             Add watermark overlay
           </label>
+          <div className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={form.is_trial} onChange={(e) => setForm({ ...form, is_trial: e.target.checked })} />
+              Trial reel
+            </label>
+            {form.is_trial && (
+              <select className="input !w-auto !py-1 text-xs" value={form.trial_strategy} onChange={(e) => setForm({ ...form, trial_strategy: e.target.value })}>
+                <option value="manual">graduate manually</option>
+                <option value="auto">graduate automatically</option>
+              </select>
+            )}
+          </div>
           <div className="flex gap-2">
             <button
               className="btn-primary flex-1"
@@ -197,6 +212,8 @@ export default function VideoDetailPage() {
                   body: {
                     effect_preset: form.effect_preset || null,
                     audio_track: form.audio_track || null,
+                    is_trial: form.is_trial,
+                    trial_strategy: form.trial_strategy,
                     trim_start: form.trim_start ? Number(form.trim_start) : null,
                     trim_end: form.trim_end ? Number(form.trim_end) : null,
                     add_watermark: form.add_watermark,

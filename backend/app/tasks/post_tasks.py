@@ -56,6 +56,7 @@ def check_and_post(self):
                         hashtags=tags,
                         status=PostStatus.scheduled,
                         scheduled_for=when,
+                        is_trial=bool(video.is_trial),
                     )
                 )
                 s.flush()  # make the reservation visible to later rules in this tick
@@ -183,6 +184,8 @@ def execute_post(self, post_id: int):
                 return {"post_id": post_id, "status": "failed", "error": "duplicate-superseded"}
             caption, tags, retries = post.caption, post.hashtags, post.retry_count
             video_id = video.id
+            want_trial = bool(video.is_trial)
+            trial_strategy = (video.trial_strategy or "manual") if want_trial else "manual"
             username, password = account.username, decrypt_secret(account.password_enc)
             video_path = video.processed_path or video.raw_path
             # Own proxy if healthy, else best spare (country-stable) — never
@@ -208,7 +211,10 @@ def execute_post(self, post_id: int):
 
         svc = InstagramService(proxy_url=proxy_url, session_path=session_path_for(username, settings.MEDIA_ROOT))
         full_caption = (caption + "\n" + tags).strip()
-        media_id, permalink, error = svc.upload_reel(username, password, video_path, full_caption)
+        media_id, permalink, error = svc.upload_reel(
+            username, password, video_path, full_caption,
+            trial=want_trial, trial_strategy=trial_strategy,
+        )
 
         if error:
             kind = error.split(":")[0]

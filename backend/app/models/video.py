@@ -44,6 +44,10 @@ class Video(Base, TimestampMixin):
     effect_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Name of the AudioTrack mixed in at processing time (resolved like effect_preset).
     audio_track: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Trial Reel: shown to non-followers first (explore engine). Falls back
+    # to a regular reel automatically when IG rejects trial for the account.
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
+    trial_strategy: Mapped[str] = mapped_column(String(16), default="manual")
     custom_filters: Mapped[str | None] = mapped_column(Text, nullable=True)
     trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -85,6 +89,7 @@ class Post(Base, TimestampMixin):
 
     fail_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=False)
 
     video: Mapped[Video] = relationship(back_populates="post")
     account: Mapped["Account"] = relationship(back_populates="posts")

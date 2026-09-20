@@ -12,6 +12,7 @@ export default function UploadPage() {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [effect, setEffect] = useState("");
   const [audio, setAudio] = useState("");
+  const [isTrial, setIsTrial] = useState(false);
   const [watermark, setWatermark] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -48,6 +49,7 @@ export default function UploadPage() {
           {
             effect_preset: effect || null,
             audio_track: audio || null,
+            is_trial: isTrial,
             add_watermark: watermark,
           },
         );
@@ -109,6 +111,10 @@ export default function UploadPage() {
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={watermark} onChange={(e) => setWatermark(e.target.checked)} />
               Watermark overlay (bottom-right, as in output)
+            </label>
+            <label className="flex items-center gap-2 text-sm" title="Show to non-followers first (explore engine). Falls back to a regular reel if Instagram rejects trial.">
+              <input type="checkbox" checked={isTrial} onChange={(e) => setIsTrial(e.target.checked)} />
+              Trial reel (non-followers first)
             </label>
           </div>
           {error && <p className="mt-3 text-sm text-red-500">{error}</p>}

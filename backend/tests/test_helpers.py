@@ -666,6 +666,17 @@ class _FakeIGClient:
         self.calls.append(("pic", str(p)))
         return True
 
+    trial_failures: int = 0
+
+    def clip_upload(self, path, caption="", **kw):
+        self.calls.append(("clip", dict(kw)))
+        if kw.get("trial") and _FakeIGClient.trial_failures > 0:
+            _FakeIGClient.trial_failures -= 1
+            raise Exception("trial not eligible for this account")
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id="111", pk="111", code="Dxyz")
+
     def account_set_private(self):
         self.calls.append(("private",))
         return True
@@ -1243,6 +1254,57 @@ class TestCheckSessionReason:
             svc = self._svc(monkeypatch, _raise)
             ok, reason = svc.check_session("u")
             assert ok is False and reason.startswith(kind) and hint_word in reason
+
+
+class TestTrialUpload:
+    def _svc(self, monkeypatch):
+        import instagrapi
+
+        from app.services.instagram_service import InstagramService
+
+        _FakeIGClient.made.clear()
+        _FakeIGClient.trial_failures = 0
+        monkeypatch.setattr(instagrapi, "Client", _FakeIGClient)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        return InstagramService()
+
+    def test_trial_passthrough(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        mid, url, err = svc.upload_reel("u", "p", "v.mp4", "cap", trial=True, trial_strategy="auto")
+        assert err == "" and mid == "111" and url == "https://www.instagram.com/reel/Dxyz/"
+        clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
+        assert clips == [{"trial": True, "trial_graduation_strategy": "auto"}]
+
+    def test_regular_untouched(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        mid, _, err = svc.upload_reel("u", "p", "v.mp4", "cap")
+        assert err == "" and mid == "111"
+        clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
+        assert clips == [{}]
+
+    def test_trial_rejection_falls_back_once(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        _FakeIGClient.trial_failures = 1
+        mid, _, err = svc.upload_reel("u", "p", "v.mp4", "cap", trial=True)
+        assert err == "" and mid == "111"
+        clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
+        # First attempt trial, fallback regular — exactly two uploads, one post.
+        assert clips[0].get("trial") is True and clips[1] == {}
+
+    def test_non_trial_error_no_fallback(self, monkeypatch):
+        import instagrapi
+
+        svc = self._svc(monkeypatch)
+
+        class Boom(_FakeIGClient):
+            def clip_upload(self, path, caption="", **kw):
+                self.calls.append(("clip", dict(kw)))
+                raise Exception("throttled: slow down")
+
+        monkeypatch.setattr(instagrapi, "Client", Boom)
+        mid, _, err = svc.upload_reel("u", "p", "v.mp4", "cap", trial=True)
+        assert mid is None and err.startswith("throttled")
+        assert len([c for c in Boom.made[-1].calls if c[0] == "clip"]) == 1
 
 
 class TestCrypto:

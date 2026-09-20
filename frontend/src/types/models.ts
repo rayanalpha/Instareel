@@ -7,7 +7,8 @@ export interface Account {
 
 export interface Video {
   id: number; original_filename: string; duration: number | null; file_size: number | null;
-  status: string; effect_preset: string | null; audio_track: string | null; add_watermark: boolean;
+  status: string; effect_preset: string | null; audio_track: string | null; is_trial: boolean;
+  trial_strategy: string; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
   processed_at: string | null; thumbnail_path: string | null; created_at: string;
 }
@@ -15,7 +16,7 @@ export interface Video {
 export interface Post {
   id: number; video_id: number; account_id: number; ig_media_id: string | null;
   ig_permalink: string | null; caption: string; hashtags: string; status: string;
-  scheduled_for: string | null; posted_at: string | null; audio_track: string | null; views_24h: number | null;
+  scheduled_for: string | null; posted_at: string | null; audio_track: string | null; is_trial: boolean; views_24h: number | null;
   views_7d: number | null; likes_24h: number | null; engagement_rate: number | null;
   fail_reason: string | null; retry_count: number; created_at: string;
 }

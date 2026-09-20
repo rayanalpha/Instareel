@@ -129,8 +129,18 @@ class InstagramService:
             log.warning("Session check for %s failed (%s): %s", username, kind, exc)
             return False, f"{kind}: {exc}"
 
-    def upload_reel(self, username: str, password: str, video_path: str, caption: str) -> tuple[str | None, str | None, str]:
-        """Blocking. Returns (media_id, permalink, error)."""
+    def upload_reel(
+        self, username: str, password: str, video_path: str, caption: str,
+        trial: bool = False, trial_strategy: str = "manual",
+    ) -> tuple[str | None, str | None, str]:
+        """Blocking. Returns (media_id, permalink, error).
+
+        With trial=True the reel first goes to non-followers (explore
+        engine). If Instagram rejects the trial mode itself (ineligible
+        account), it falls back to a regular reel instead of failing —
+        the fallback only triggers on trial-specific errors at configure
+        time, never after a publish, so no double post is possible.
+        """
         cl = self._make_client(username)
         try:
             ok, _ = _feed_with_retry(cl)
@@ -142,7 +152,19 @@ class InstagramService:
                     except Exception:
                         pass
             # Random pre-post delay is applied by the caller (needs async sleep).
-            media = cl.clip_upload(video_path, caption=caption)
+            if trial:
+                try:
+                    media = cl.clip_upload(
+                        video_path, caption=caption, trial=True,
+                        trial_graduation_strategy=trial_strategy or "manual",
+                    )
+                except Exception as texc:
+                    if "trial" not in f"{type(texc).__name__}: {texc}".lower():
+                        raise
+                    log.warning("Trial upload rejected for %s — falling back to regular reel: %s", username, texc)
+                    media = cl.clip_upload(video_path, caption=caption)
+            else:
+                media = cl.clip_upload(video_path, caption=caption)
             media_id = str(getattr(media, "id", "") or getattr(media, "pk", ""))
             code = getattr(media, "code", None)
             permalink = f"https://www.instagram.com/reel/{code}/" if code else None

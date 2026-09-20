@@ -28,7 +28,8 @@ def _out(v: Video) -> VideoOut:
     return VideoOut(
         id=v.id, original_filename=v.original_filename, duration=v.duration, file_size=v.file_size,
         status=v.status.value, effect_preset=v.effect_preset, audio_track=v.audio_track,
-        custom_filters=v.custom_filters, add_watermark=v.add_watermark,
+        custom_filters=v.custom_filters, is_trial=v.is_trial, trial_strategy=v.trial_strategy,
+        add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
         processed_at=v.processed_at, thumbnail_path=v.thumbnail_path, created_at=v.created_at,
     )
@@ -48,7 +49,7 @@ def _post_out(p: Post, audio_track: str | None = None) -> PostOut:
     return PostOut(
         id=p.id, video_id=p.video_id, account_id=p.account_id, ig_media_id=p.ig_media_id,
         ig_permalink=p.ig_permalink, caption=p.caption, hashtags=p.hashtags, status=p.status.value,
-        audio_track=audio_track,
+        audio_track=audio_track, is_trial=p.is_trial,
         scheduled_for=p.scheduled_for, posted_at=p.posted_at, views_24h=p.views_24h,
         views_7d=p.views_7d, likes_24h=p.likes_24h, engagement_rate=p.engagement_rate,
         fail_reason=p.fail_reason, retry_count=p.retry_count, created_at=p.created_at,
@@ -219,7 +220,8 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
         raise HTTPException(404, "Video not found")
     if body.trim_start is not None and body.trim_end is not None and body.trim_end <= body.trim_start:
         raise HTTPException(400, "trim_end must be greater than trim_start")
-    for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end", "add_watermark"):
+    for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end",
+                    "is_trial", "trial_strategy", "add_watermark"):
         val = getattr(body, field)
         if val is not None:
             setattr(v, field, val)
@@ -323,10 +325,16 @@ async def schedule_post(body: SchedulePostIn, _: str = Depends(get_current_admin
         if not acc:
             raise HTTPException(400, "No eligible account available")
         account_id = acc.id
+    # Trial-ness lives on the video (strategy included); the post carries a
+    # snapshot for display/analytics. Keep both consistent here as the beat does.
+    v.is_trial = body.is_trial
+    if body.trial_strategy:
+        v.trial_strategy = body.trial_strategy
     post = Post(
         video_id=body.video_id, account_id=account_id, caption=body.caption,
         hashtags=body.hashtags, status=PostStatus.scheduled,
         scheduled_for=body.scheduled_for or dt.datetime.now(dt.timezone.utc),
+        is_trial=body.is_trial,
     )
     db.add(post)
     await db.commit()

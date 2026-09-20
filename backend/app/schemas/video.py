@@ -12,6 +12,8 @@ class VideoOut(BaseModel):
     effect_preset: str | None
     audio_track: str | None
     custom_filters: str | None
+    is_trial: bool
+    trial_strategy: str
     add_watermark: bool
     trim_start: float | None
     trim_end: float | None
@@ -27,6 +29,8 @@ class VideoSettingsUpdate(BaseModel):
     custom_filters: str | None = None
     trim_start: float | None = Field(default=None, ge=0)
     trim_end: float | None = Field(default=None, ge=0)
+    is_trial: bool | None = None
+    trial_strategy: str | None = Field(default=None, pattern="^(manual|auto)$")
     add_watermark: bool | None = None
 
 
@@ -39,6 +43,7 @@ class PostOut(BaseModel):
     caption: str
     hashtags: str
     audio_track: str | None = None
+    is_trial: bool = False
     status: str
     scheduled_for: dt.datetime | None
     posted_at: dt.datetime | None
@@ -57,3 +62,5 @@ class SchedulePostIn(BaseModel):
     scheduled_for: dt.datetime | None = None
     caption: str = ""
     hashtags: str = ""
+    is_trial: bool = False
+    trial_strategy: str = Field(default="manual", pattern="^(manual|auto)$")
