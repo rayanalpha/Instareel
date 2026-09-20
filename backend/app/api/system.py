@@ -169,6 +169,9 @@ DEFAULT_SETTINGS = {
     "watermark_enabled": ("true", "processing"),
     "post_jitter_minutes": ("5", "scheduler"),
     "analytics_refresh_hours": ("4", "scheduler"),
+    "pool_country": ("", "proxy"),
+    "pool_require_country": ("false", "proxy"),
+    "pool_purge_after_days": ("7", "proxy"),
 }
 
 MASKED = "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"

@@ -9,6 +9,7 @@ const EVENTS = [
   "post_status_update",
   "account_status_change",
   "new_log",
+  "proxy_pool_update",
 ];
 
 /** Resolve the WebSocket URL: same-origin in the browser when no API host
@@ -62,6 +63,9 @@ export function useRealtimeFeed(enabled: boolean) {
             qc.invalidateQueries({ queryKey: ["accounts"] });
           } else if (msg.event === "new_log") {
             qc.invalidateQueries({ queryKey: ["logs"] });
+          } else if (msg.event === "proxy_pool_update") {
+            qc.invalidateQueries({ queryKey: ["proxies"] });
+            qc.invalidateQueries({ queryKey: ["proxy-sources"] });
           }
         } catch {
           /* ignore malformed frames */

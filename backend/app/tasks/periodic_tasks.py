@@ -240,7 +240,12 @@ def check_all_proxies():
                     continue
                 record_proxy_check(s, p, ok, latency_ms=latency,
                                    error="" if ok else "periodic check failed")
+        from app.tasks.sync_helpers import publish_sync
+
         log_event_sync("INFO", "system", f"Proxy health check: {swept} swept, {verified} verified")
+        # Live UI: dashboards refetch the pool the moment a cycle lands
+        # instead of waiting for the next poll or a remount.
+        publish_sync("proxy_pool_update", {"swept": swept, "verified": verified})
         return {"swept": swept, "verified": verified}
     except Exception:  # noqa: BLE001
         log.exception("check_all_proxies failed")
@@ -353,8 +358,15 @@ def refresh_proxy_pool():
             per_source.append({"source": name, "added": added, "lines": total, "error": err})
             total_added += added
         with SyncSessionLocal() as s:
-            purged = purge_stale_auto_proxies(s)
+            try:
+                purge_after = int(sched.get_setting(s, "pool_purge_after_days", "7"))
+            except ValueError:
+                purge_after = 7
+            purged = purge_stale_auto_proxies(s, max_age_days=min(max(purge_after, 1), 30))
+        from app.tasks.sync_helpers import publish_sync
+
         log_event_sync("INFO", "proxy", f"Pool refresh: {total_added} added, {purged} stale purged")
+        publish_sync("proxy_pool_update", {"added": total_added, "purged": purged})
         return {"added": total_added, "purged": purged, "sources": per_source}
     except Exception:  # noqa: BLE001
         log.exception("refresh_proxy_pool failed")

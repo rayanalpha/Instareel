@@ -515,11 +515,15 @@ async def purge_pool_now(_: str = Depends(get_current_admin)):
     import concurrent.futures
 
     from app.database import SyncSessionLocal
-    from app.tasks.sync_helpers import purge_stale_auto_proxies
+    from app.tasks.sync_helpers import get_setting, purge_stale_auto_proxies
 
     def _run() -> int:
         with SyncSessionLocal() as s:
-            return purge_stale_auto_proxies(s)
+            try:
+                days = int(get_setting(s, "pool_purge_after_days", "7"))
+            except ValueError:
+                days = 7
+            return purge_stale_auto_proxies(s, max_age_days=min(max(days, 1), 30))
 
     # The purge helper is sync (same session style as the celery tasks).
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

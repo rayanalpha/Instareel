@@ -159,6 +159,7 @@ export default function ProxiesPage() {
               <span className={`h-2 w-2 rounded-full ${p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} />
               <code className="text-xs">{p.protocol}://{p.url.replace(/^https?:\/\//, "")}</code>
               <span className="text-zinc-500">{p.country ?? ""} · {p.latency_ms != null ? `${p.latency_ms}ms` : "—"} · fails {p.fail_count} · {p.source ?? "manual"}</span>
+              {!p.is_active && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600 dark:bg-red-900/40">disabled</span>}
               {p.last_error && <span className="max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
               <span className="ml-auto flex gap-2">
                 <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => test.mutate({ url: `/proxies/${p.id}/test` })}>Test</button>
@@ -169,7 +170,7 @@ export default function ProxiesPage() {
           {test.data && <p className="mt-2 text-xs text-zinc-500">Last test: {JSON.stringify(test.data)}</p>}
         </Card>
       )}
-      <p className="text-xs text-zinc-500">Assign a proxy to an account from the Accounts page (proxy_id). Health checks run every 30 minutes in oldest-first batches (fast TCP sweep, full verify for survivors) so posting never stalls.</p>
+      <p className="text-xs text-zinc-500">Assign a proxy to an account from the Accounts page (proxy_id). Health checks run every 30 minutes in oldest-first batches (fast TCP sweep, full verify for survivors) so posting never stalls. Results land live via realtime — no page switching needed. Unhealthy auto-fetched proxies are deleted automatically after the retention set in Settings → proxy → pool_purge_after_days (manual ones are never touched).</p>
     </div>
   );
 }

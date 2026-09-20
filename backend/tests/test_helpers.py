@@ -1172,6 +1172,42 @@ class TestCheckBatching:
         assert ok is True and isinstance(ms, int)
 
 
+class TestPoolPolicy:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def test_purge_honors_custom_age(self):
+        import datetime as dt
+
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import purge_stale_auto_proxies
+
+        s = self._session()
+        old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)
+        s.add(Proxy(url="http://gone:1", protocol=ProxyProtocol.http, source="x",
+                    is_active=False, is_healthy=False, fail_count=9, last_checked=old))
+        s.add(Proxy(url="http://fresh:1", protocol=ProxyProtocol.http, source="x",
+                    is_active=False, is_healthy=False, fail_count=9, last_checked=old))
+        s.commit()
+        # Default 7d keeps both; a 1-day policy reaps both.
+        assert purge_stale_auto_proxies(s, max_age_days=7) == 0
+        assert purge_stale_auto_proxies(s, max_age_days=1) == 2
+
+    def test_pool_defaults_shipped(self):
+        from app.api.system import DEFAULT_SETTINGS
+
+        assert DEFAULT_SETTINGS["pool_country"] == ("", "proxy")
+        assert DEFAULT_SETTINGS["pool_require_country"] == ("false", "proxy")
+        assert DEFAULT_SETTINGS["pool_purge_after_days"] == ("7", "proxy")
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
