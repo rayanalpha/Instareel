@@ -167,8 +167,10 @@ async def test_session(account_id: int, _: str = Depends(get_current_admin)):
         purl = proxy_url_for(proxy) if proxy else None
         spath = acc.session_file_path or session_path_for(username, settings.MEDIA_ROOT)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        valid = pool.submit(InstagramService(proxy_url=purl, session_path=spath).check_session, username).result(timeout=120)
-    return {"valid": valid}
+        valid, reason = pool.submit(
+            InstagramService(proxy_url=purl, session_path=spath).check_session, username
+        ).result(timeout=120)
+    return {"valid": valid, "detail": "Session is valid" if valid else f"Session invalid — {reason}"}
 
 
 @router.post("/{account_id}/session")

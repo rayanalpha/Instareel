@@ -105,15 +105,29 @@ class InstagramService:
             log.warning("Login failed for %s (%s): %s", username, kind, exc)
             return False, f"{kind}: {exc}"
 
-    def check_session(self, username: str) -> bool:
+    def check_session(self, username: str) -> "tuple[bool, str]":
+        """Session validity plus a human-readable reason (surfaced in the UI).
+
+        Returns (True, "ok") or (False, "<kind>: <hint>") — the old bool-only
+        contract hid WHY a proxy route fails, forcing log-diving.
+        """
         cl = self._make_client(username)
         try:
             ok, kind = _feed_with_retry(cl)
-            log.info("Session check for %s: %s", username, "valid" if ok else f"invalid ({kind})")
-            return ok
+            if ok:
+                log.info("Session check for %s: valid", username)
+                return True, "ok"
+            hint = {
+                "challenge": "Instagram demands verification on this route — complete it in the app/browser, then re-test.",
+                "login_required": "Session rejected via this route (IP change or killed session) — refresh the session.",
+                "throttled": "This egress IP is rate-limited by Instagram — use another proxy.",
+            }.get(kind, "Network/proxy path failed — check the proxy itself (Test button).")
+            log.info("Session check for %s: invalid (%s)", username, kind)
+            return False, f"{kind}: {hint}"
         except Exception as exc:
-            log.warning("Session check for %s failed (%s): %s", username, _classify(exc), exc)
-            return False
+            kind = _classify(exc)
+            log.warning("Session check for %s failed (%s): %s", username, kind, exc)
+            return False, f"{kind}: {exc}"
 
     def upload_reel(self, username: str, password: str, video_path: str, caption: str) -> tuple[str | None, str | None, str]:
         """Blocking. Returns (media_id, permalink, error)."""

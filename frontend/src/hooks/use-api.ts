@@ -17,7 +17,8 @@ function announce(data: unknown) {
   } else if (d.ok === true && "detail" in d) {
     toast("success", String(d.detail));
   } else if ("valid" in d) {
-    toast(d.valid ? "success" : "error", d.valid ? "Session is valid" : "Session invalid or expired");
+    const msg = typeof d.detail === "string" && d.detail ? d.detail : null;
+    toast(d.valid ? "success" : "error", msg ?? (d.valid ? "Session is valid" : "Session invalid or expired"));
   } else if (d.queued === true) {
     toast("info", "Queued — watch the worker logs / status");
   } else if (typeof d.error === "string") {

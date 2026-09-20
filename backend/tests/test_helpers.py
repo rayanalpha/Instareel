@@ -1208,6 +1208,43 @@ class TestPoolPolicy:
         assert DEFAULT_SETTINGS["pool_purge_after_days"] == ("7", "proxy")
 
 
+class TestCheckSessionReason:
+    def _svc(self, monkeypatch, feed_impl):
+        import instagrapi
+
+        from app.services.instagram_service import InstagramService
+
+        _FakeIGClient.made.clear()
+
+        class FeedFake(_FakeIGClient):
+            def get_timeline_feed(self):
+                self.calls.append(("feed",))
+                return feed_impl(self)
+
+        monkeypatch.setattr(instagrapi, "Client", FeedFake)
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        return InstagramService()
+
+    def test_valid(self, monkeypatch):
+        svc = self._svc(monkeypatch, lambda self: {"ok": 1})
+        assert svc.check_session("u") == (True, "ok")
+
+    def test_kinds_carry_hints(self, monkeypatch):
+        cases = [
+            (Exception("login_required: expired"), "login_required", "refresh"),
+            (Exception("challenge_required: verify"), "challenge", "verification"),
+            (Exception("throttled: slow down"), "throttled", "rate-limited"),
+            (TimeoutError("timed out"), "generic", "proxy"),
+        ]
+        for exc, kind, hint_word in cases:
+            def _raise(self, _e=exc):
+                raise _e
+
+            svc = self._svc(monkeypatch, _raise)
+            ok, reason = svc.check_session("u")
+            assert ok is False and reason.startswith(kind) and hint_word in reason
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")
