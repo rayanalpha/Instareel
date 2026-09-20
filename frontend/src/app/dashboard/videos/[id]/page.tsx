@@ -27,6 +27,9 @@ export default function VideoDetailPage() {
   const { data: audios } = useAudios();
   const save = useApiMutation("put", [["videos"]]);
   const process = useApiMutation("post", [["videos"]]);
+  const postNow = useApiMutation("post", [["videos"], ["posts"], ["queue"]]);
+  const [nowPostId, setNowPostId] = useState<number | null>(null);
+  const [nowState, setNowState] = useState<{ status: string; url?: string; error?: string } | null>(null);
 
   const [loadError, setLoadError] = useState("");
   async function load() {
@@ -115,6 +118,44 @@ export default function VideoDetailPage() {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [id, video?.status]);
+
+  // Live status for a Post-now request: poll until a terminal post state.
+  useEffect(() => {
+    if (!nowPostId) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const poll = async () => {
+      try {
+        const { data } = await api.get(`/posts/${nowPostId}`);
+        if (cancelled) return;
+        if (data.status === "posted" || data.status === "failed") {
+          stop();
+          setNowState({ status: data.status, url: data.ig_permalink ?? undefined, error: data.fail_reason ?? undefined });
+          load();
+        } else {
+          setNowState({ status: data.status });
+        }
+      } catch {
+        if (!cancelled) {
+          stop();
+          setNowState({ status: "failed", error: "status check failed" });
+        }
+      }
+    };
+    poll();
+    timer = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+    /* eslint-disable-next-line */
+  }, [nowPostId]);
 
   if (loadError) return <EmptyState title="Load failed" hint={loadError} />;
   if (!video) return <Spinner />;
@@ -232,6 +273,37 @@ export default function VideoDetailPage() {
               Re-process
             </button>
           </div>
+          {video.status === "processed" && (
+            <div className="mt-2">
+              <button
+                className="btn-primary w-full"
+                disabled={postNow.isPending || nowState?.status === "scheduled" || nowState?.status === "posting"}
+                onClick={async () => {
+                  setNowState(null);
+                  const res = await postNow.mutateAsync({
+                    url: "/posts/schedule",
+                    body: { video_id: Number(id), is_trial: form.is_trial },
+                  });
+                  setNowPostId((res as { id: number }).id);
+                  setNowState({ status: "scheduled" });
+                }}
+              >
+                {postNow.isPending ? "Queuing…" : "Post now"}
+              </button>
+              {nowState && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  {nowState.status === "posted" && nowState.url ? (
+                    <a className="text-emerald-500 hover:underline" href={nowState.url} target="_blank">Posted — open reel ↗</a>
+                  ) : nowState.status === "failed" ? (
+                    <span className="text-red-500">Failed: {nowState.error ?? "see Posts"}</span>
+                  ) : (
+                    <>Posting… ({nowState.status})</>
+                  )}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-zinc-500">Schedules for now — the per-minute beat fires it, then live status shows here.</p>
+            </div>
+          )}
           <p className="text-xs text-zinc-500">Output: 720×1280 H.264 + loudnorm audio, thumbnail at 25% duration.</p>
         </div>
       </Card>

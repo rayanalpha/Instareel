@@ -1307,6 +1307,63 @@ class TestTrialUpload:
         assert len([c for c in Boom.made[-1].calls if c[0] == "clip"]) == 1
 
 
+class TestScheduleAutofill:
+    def test_empty_text_gets_weighted_autofill(self):
+        import asyncio
+
+        async def go():
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from fastapi.testclient import TestClient
+
+            from app.api.deps import get_current_admin, get_db
+            from app.database import Base
+            from app.main import app
+            from app.models import Account, CaptionTemplate, HashtagSet, Video, VideoStatus
+
+            engine = create_async_engine("sqlite+aiosqlite://")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+
+            async def override_db():
+                async with maker() as s:
+                    yield s
+
+            app.dependency_overrides[get_current_admin] = lambda: "admin"
+            app.dependency_overrides[get_db] = override_db
+            try:
+                async with maker() as s:
+                    s.add(Account(username="sn1", password_enc="x"))
+                    s.add(Video(original_filename="s.mp4", raw_path="/tmp/s.mp4",
+                                md5_hash="sn1", status=VideoStatus.processed))
+                    s.add(CaptionTemplate(name="c1", content="Hello world"))
+                    s.add(HashtagSet(name="h1", tags="#a, #b, #c"))
+                    await s.commit()
+                    acc_id = (await s.execute(select(Account).where(Account.username == "sn1"))).scalar_one().id
+                    vid_id = (await s.execute(select(Video).where(Video.md5_hash == "sn1"))).scalar_one().id
+                with TestClient(app) as client:
+                    r = client.post("/api/v1/posts/schedule",
+                                    json={"video_id": vid_id, "account_id": acc_id})
+                    assert r.status_code == 201, r.text
+                    body = r.json()
+                    assert body["caption"] == "Hello world"
+                    assert all(t in body["hashtags"] for t in ("#a", "#b", "#c"))
+                    # Explicit text is respected, not overwritten.
+                    r2 = client.post("/api/v1/posts/schedule",
+                                     json={"video_id": vid_id, "account_id": acc_id,
+                                           "caption": "Mine", "hashtags": "#z"})
+                    assert r2.status_code == 400  # already queued by the first call
+                async with maker() as s:
+                    cap = (await s.execute(select(CaptionTemplate).where(CaptionTemplate.name == "c1"))).scalar_one()
+                    assert cap.use_count == 1
+            finally:
+                app.dependency_overrides.clear()
+                await engine.dispose()
+
+        asyncio.run(go())
+
+
 class TestCrypto:
     def test_roundtrip(self):
         token = encrypt_secret("s3cret")

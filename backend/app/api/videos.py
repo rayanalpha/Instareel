@@ -330,9 +330,17 @@ async def schedule_post(body: SchedulePostIn, _: str = Depends(get_current_admin
     v.is_trial = body.is_trial
     if body.trial_strategy:
         v.trial_strategy = body.trial_strategy
+    # Manual scheduling with empty text gets the same weighted auto-fill as
+    # the beat (least-used caption first), so one-click flows post complete
+    # reels instead of caption-less ones.
+    caption, hashtags = body.caption, body.hashtags
+    if not (caption or "").strip():
+        caption, _cap_id = await sched_async.pick_caption(db, None)
+    if not (hashtags or "").strip():
+        hashtags = await sched_async.pick_hashtags(db)
     post = Post(
-        video_id=body.video_id, account_id=account_id, caption=body.caption,
-        hashtags=body.hashtags, status=PostStatus.scheduled,
+        video_id=body.video_id, account_id=account_id, caption=caption,
+        hashtags=hashtags, status=PostStatus.scheduled,
         scheduled_for=body.scheduled_for or dt.datetime.now(dt.timezone.utc),
         is_trial=body.is_trial,
     )
