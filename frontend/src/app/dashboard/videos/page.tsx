@@ -42,8 +42,12 @@ export default function VideosPage() {
               </div>
               <p className="text-xs text-zinc-500">
                 {v.duration ? `${v.duration.toFixed(1)}s` : "—"} · {timeAgo(v.created_at)}
-                {v.failed_reason ? ` · ${v.failed_reason.slice(0, 80)}` : ""}
               </p>
+              {v.failed_reason && (
+                <p title={v.failed_reason} className="mt-1 truncate rounded-md bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-950 dark:text-red-400">
+                  ⚠ {v.failed_reason}
+                </p>
+              )}
               <div className="mt-3 flex gap-2">
                 <Link href={`/dashboard/videos/${v.id}`} className="btn-ghost flex-1 !py-1.5 text-xs">Detail</Link>
                 {(v.status === "uploaded" || v.status === "failed") && (

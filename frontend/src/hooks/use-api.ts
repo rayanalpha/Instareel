@@ -20,7 +20,7 @@ function announce(data: unknown) {
     const msg = typeof d.detail === "string" && d.detail ? d.detail : null;
     toast(d.valid ? "success" : "error", msg ?? (d.valid ? "Session is valid" : "Session invalid or expired"));
   } else if (d.queued === true) {
-    toast("info", "Queued — watch the worker logs / status");
+    toast("info", "Processing started — the status badge updates here automatically");
   } else if (typeof d.error === "string") {
     toast("error", d.error);
   }

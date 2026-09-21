@@ -214,7 +214,17 @@ export default function VideoDetailPage() {
           </button>
         )}
         {actionError && <p className="mt-2 text-sm text-red-500">{actionError}</p>}
-        {video.failed_reason && <p className="mt-2 text-sm text-red-500">{video.failed_reason}</p>}
+        {video.status === "failed" && video.failed_reason && (
+          <div className="mt-2 rounded-lg border border-red-500 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+            <p className="font-semibold">Processing failed</p>
+            <p className="mt-1 break-words">{video.failed_reason}</p>
+          </div>
+        )}
+        {video.status === "processed" && (
+          <div className="mt-2 rounded-lg border border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+            <span className="font-semibold">Processed —</span> preview is ready and Post now is unlocked below.
+          </div>
+        )}
       </Card>
 
       <Card>

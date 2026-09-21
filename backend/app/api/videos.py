@@ -197,6 +197,11 @@ async def trigger_process(request: Request, video_id: int, effect_filter: str = 
         raise HTTPException(409, "Already processing")
     from app.tasks.video_tasks import process_video_task
 
+    # Flip to processing NOW so the dashboard shows progress immediately
+    # instead of sitting on "uploaded" until the worker picks the task up.
+    v.status = VideoStatus.processing
+    v.failed_reason = None
+    await db.commit()
     process_video_task.delay(video_id, effect_filter)
     return {"queued": True}
 
@@ -211,6 +216,10 @@ async def reprocess(request: Request, video_id: int, effect_filter: str = "", _:
         raise HTTPException(409, "Already processing")
     from app.tasks.video_tasks import process_video_task
 
+    # Same immediate flip as trigger_process: the UI polls on status.
+    v.status = VideoStatus.processing
+    v.failed_reason = None
+    await db.commit()
     process_video_task.delay(video_id, effect_filter)
     return {"queued": True}
 
