@@ -29,7 +29,8 @@ interface UiState {
 }
 
 export const useUi = create<UiState>((set) => ({
-  sidebarOpen: true,
+  // Closed by default on phones: the hamburger opens it as a drawer.
+  sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 }));
 

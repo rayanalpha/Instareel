@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Header, MobileNav, Sidebar, TopBar } from "@/components/layout";
+import { Header, MobileDrawer, MobileNav, Sidebar, TopBar } from "@/components/layout";
 import { Toaster } from "@/components/toast";
 import { Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -51,6 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <Toaster />
       <MobileNav />
+      <MobileDrawer />
     </div>
   );
 }
