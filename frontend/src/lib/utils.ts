@@ -30,6 +30,12 @@ export function timeAgo(iso: string | null | undefined): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+/** Host part of a stored proxy URL. Stored URLs already carry their own
+ *  scheme (e.g. socks5://h:port) — callers must not prepend protocol again. */
+export function proxyHost(url: string): string {
+  return (url || "").replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+}
+
 export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function dayLabel(dow: number): string {

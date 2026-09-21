@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useApiMutation } from "@/hooks/use-api";
-import { fmt, timeAgo } from "@/lib/utils";
+import { fmt, proxyHost, timeAgo } from "@/lib/utils";
 import type { Account, Proxy } from "@/types/models";
 
 export default function AccountDetailPage() {
@@ -88,7 +88,7 @@ export default function AccountDetailPage() {
               <option value="">No proxy</option>
               {proxies.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.protocol}://{p.url.replace(/^https?:\/\//, "")}{p.country ? ` (${p.country})` : ""}
+                  {p.protocol}://{proxyHost(p.url)}{p.country ? ` (${p.country})` : ""}
                 </option>
               ))}
             </select>

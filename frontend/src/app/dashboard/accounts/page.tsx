@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { Card, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useAccounts, useApiMutation, useProxies } from "@/hooks/use-api";
-import { timeAgo } from "@/lib/utils";
+import { proxyHost, timeAgo } from "@/lib/utils";
 import type { Account, Proxy } from "@/types/models";
 
 export default function AccountsPage() {
@@ -25,7 +25,7 @@ export default function AccountsPage() {
   const proxyList = (proxies ?? []) as Proxy[];
 
   function proxyLabel(p: Proxy): string {
-    const host = p.url.replace(/^https?:\/\//, "");
+    const host = proxyHost(p.url);
     return `${p.protocol}://${host}${p.country ? ` (${p.country})` : ""}${p.is_healthy ? "" : " [down]"}`;
   }
 

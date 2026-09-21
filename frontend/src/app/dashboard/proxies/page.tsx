@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, useProxies, useProxySources } from "@/hooks/use-api";
 import { api } from "@/lib/api";
-import { timeAgo } from "@/lib/utils";
+import { proxyHost, timeAgo } from "@/lib/utils";
 import type { Proxy, ProxyImportResult, ProxySource } from "@/types/models";
 
 interface PipelineRun { at: string; message: string }
@@ -256,7 +256,7 @@ export default function ProxiesPage() {
           {proxies.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
               <span className={`h-2 w-2 shrink-0 rounded-full ${p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} />
-              <code className="min-w-0 break-all text-xs">{p.protocol}://{p.url.replace(/^https?:\/\//, "")}</code>
+              <code className="min-w-0 break-all text-xs">{p.protocol}://{proxyHost(p.url)}</code>
               <span className="w-full text-zinc-500 sm:w-auto">{p.country ?? ""} · {p.latency_ms != null ? `${p.latency_ms}ms` : "—"} · fails {p.fail_count} · {p.source ?? "manual"}</span>
               {!p.is_active && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600 dark:bg-red-900/40">disabled</span>}
               {p.last_error && <span className="max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
