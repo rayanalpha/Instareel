@@ -330,6 +330,20 @@ class TestResources:
         plain = next(p for p in rows if p["url"] == "http://2.2.2.2:8080")
         assert plain["country"] == "FR", plain
 
+    def test_proxy_pipeline_shape(self, client):
+        c, _, _ = client
+        c.post("/api/v1/proxies", json={"url": "http://1.1.1.1:8080", "protocol": "http"})
+        pipe = c.get("/api/v1/proxies/pipeline")
+        assert pipe.status_code == 200, pipe.text
+        body = pipe.json()
+        assert body["counts"]["total"] == 1
+        assert body["counts"]["never_checked"] == 1
+        assert body["checker"]["batch"] == 60
+        assert body["checker"]["max_fails"] == 5
+        assert body["pool"]["purge_after_days"] >= 1
+        assert set(body["last_runs"]) == {"health_check", "pool_refresh", "purge", "auto_disabled"}
+        assert isinstance(body["recent"], list)
+
     def test_rules_captions_crud(self, client):
         c, _, _ = client
         acc = c.post("/api/v1/accounts", json={"username": "r1", "password": "pw"}).json()["id"]

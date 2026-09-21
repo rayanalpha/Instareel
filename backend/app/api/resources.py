@@ -282,6 +282,93 @@ def _proxy_out(p: Proxy) -> ProxyOut:
     )
 
 
+@proxy_router.get("/pipeline")
+async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Granular status of the proxy pipeline: pool snapshot, checker config,
+    pool policy, last cycle results, and recent proxy activity."""
+    from sqlalchemy import desc
+
+    from app.models import Setting, SystemLog
+    from app.tasks.sync_helpers import (
+        MAX_PROXY_FAILS,
+        PROXY_CHECK_BATCH,
+        PROXY_FAIL_COOLDOWN_HOURS,
+        PROXY_VERIFY_LIMIT,
+        SWEEP_TCP_TIMEOUT,
+    )
+
+    rows = (await db.execute(select(Proxy))).scalars().all()
+    settings = {r.key: (r.value or "") for r in (await db.execute(select(Setting))).scalars().all()}
+
+    counts = {
+        "total": len(rows),
+        "healthy": sum(1 for p in rows if p.is_healthy and p.is_active),
+        "dead": sum(1 for p in rows if not p.is_healthy and p.is_active),
+        "disabled": sum(1 for p in rows if not p.is_active),
+        "never_checked": sum(1 for p in rows if p.last_checked is None),
+        "manual": sum(1 for p in rows if (p.source or "manual") == "manual"),
+        "auto": sum(1 for p in rows if (p.source or "manual") != "manual"),
+    }
+    lats = [p.latency_ms for p in rows if p.latency_ms is not None]
+    checked = [p.last_checked for p in rows if p.last_checked is not None]
+
+    async def last_log(category: str, like: str):
+        q = (
+            select(SystemLog)
+            .where(SystemLog.category == category, SystemLog.message.like(like))
+            .order_by(desc(SystemLog.timestamp))
+            .limit(1)
+        )
+        r = (await db.execute(q)).scalars().first()
+        return {"at": r.timestamp, "message": r.message} if r else None
+
+    recent = (
+        await db.execute(
+            select(SystemLog)
+            .where(SystemLog.category == "proxy")
+            .order_by(desc(SystemLog.timestamp))
+            .limit(8)
+        )
+    ).scalars().all()
+
+    try:
+        purge_days = int(settings.get("pool_purge_after_days", "7"))
+    except ValueError:
+        purge_days = 7
+    return {
+        "counts": counts,
+        "latency": {
+            "avg_ms": round(sum(lats) / len(lats)) if lats else None,
+            "max_ms": max(lats) if lats else None,
+            "measured": len(lats),
+        },
+        "oldest_checked_at": min(checked) if checked else None,
+        "checker": {
+            "cadence": "every 30 min",
+            "batch": PROXY_CHECK_BATCH,
+            "verify_limit": PROXY_VERIFY_LIMIT,
+            "sweep_timeout_s": SWEEP_TCP_TIMEOUT,
+            "max_fails": MAX_PROXY_FAILS,
+            "fail_cooldown_h": PROXY_FAIL_COOLDOWN_HOURS,
+        },
+        "pool": {
+            "refresh_cadence": "every 3 h",
+            "purge_after_days": purge_days,
+            "country": settings.get("pool_country", ""),
+            "require_country": settings.get("pool_require_country", "false").lower() == "true",
+        },
+        "last_runs": {
+            "health_check": await last_log("system", "Proxy health check:%"),
+            "pool_refresh": await last_log("proxy", "Pool refresh:%"),
+            "purge": await last_log("proxy", "%purg%"),
+            "auto_disabled": await last_log("proxy", "%auto-disabled%"),
+        },
+        "recent": [
+            {"at": r.timestamp, "level": r.level.value, "message": r.message} for r in recent
+        ],
+    }
+
+
 @proxy_router.get("", response_model=list[ProxyOut])
 async def list_proxies(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(Proxy).order_by(Proxy.id))).scalars().all()

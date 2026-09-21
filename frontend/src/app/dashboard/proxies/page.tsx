@@ -1,10 +1,104 @@
 "use client";
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
 import { useApiMutation, useProxies, useProxySources } from "@/hooks/use-api";
 import { api } from "@/lib/api";
+import { timeAgo } from "@/lib/utils";
 import type { Proxy, ProxyImportResult, ProxySource } from "@/types/models";
+
+interface PipelineRun { at: string; message: string }
+interface Pipeline {
+  counts: { total: number; healthy: number; dead: number; disabled: number; never_checked: number; manual: number; auto: number };
+  latency: { avg_ms: number | null; max_ms: number | null; measured: number };
+  oldest_checked_at: string | null;
+  checker: { cadence: string; batch: number; verify_limit: number; sweep_timeout_s: number; max_fails: number; fail_cooldown_h: number };
+  pool: { refresh_cadence: string; purge_after_days: number; country: string; require_country: boolean };
+  last_runs: { health_check: PipelineRun | null; pool_refresh: PipelineRun | null; purge: PipelineRun | null; auto_disabled: PipelineRun | null };
+  recent: { at: string; level: string; message: string }[];
+}
+
+function RunLine({ label, run }: { label: string; run: PipelineRun | null }) {
+  return (
+    <p className="text-xs text-zinc-500">
+      <span className="font-semibold text-zinc-700 dark:text-zinc-300">{label}: </span>
+      {run ? <><span title={run.message}>{run.message.slice(0, 90)}</span> <span className="text-zinc-400">· {timeAgo(run.at)}</span></> : "never yet"}
+    </p>
+  );
+}
+
+/** Granular view of the proxy pipeline: pool snapshot, checker config +
+ *  last cycle, pool policy + last refresh, and recent proxy activity.
+ *  Polls every 20s so a running check-all visibly lands without reload. */
+function PipelineStatus() {
+  const { data } = useQuery({
+    queryKey: ["proxy-pipeline"],
+    queryFn: async () => (await api.get("/proxies/pipeline")).data as Pipeline,
+    refetchInterval: 20000,
+  });
+  if (!data) return null;
+  const c = data.counts;
+  const tiles: { label: string; value: string; tone: string }[] = [
+    { label: "Healthy", value: `${c.healthy}/${c.total}`, tone: "text-emerald-500" },
+    { label: "Dead", value: String(c.dead), tone: c.dead ? "text-red-500" : "text-zinc-500" },
+    { label: "Disabled", value: String(c.disabled), tone: "text-zinc-500" },
+    { label: "Never checked", value: String(c.never_checked), tone: c.never_checked ? "text-amber-500" : "text-zinc-500" },
+    { label: "Avg latency", value: data.latency.avg_ms != null ? `${data.latency.avg_ms}ms` : "—", tone: "text-zinc-700 dark:text-zinc-300" },
+    { label: "Oldest check", value: data.oldest_checked_at ? timeAgo(data.oldest_checked_at) : "—", tone: "text-zinc-700 dark:text-zinc-300" },
+  ];
+  return (
+    <Card>
+      <div className="mb-2 flex items-center gap-2">
+        <CardTitle>Pipeline status</CardTitle>
+        <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" /><span className="h-2 w-2 rounded-full bg-emerald-500" /></span>
+        <span className="ml-auto text-[11px] text-zinc-400">live · refreshes every 20s</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {tiles.map((t) => (
+          <div key={t.label} className="rounded-lg bg-zinc-50 px-2 py-1.5 text-center dark:bg-zinc-900">
+            <p className={`text-base font-extrabold ${t.tone}`}>{t.value}</p>
+            <p className="text-[10px] uppercase tracking-wide text-zinc-400">{t.label}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="space-y-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
+          <p className="text-xs font-bold">Health checker <span className="font-normal text-zinc-400">· {data.checker.cadence}</span></p>
+          <p className="text-xs text-zinc-500">
+            Batch {data.checker.batch} oldest-first · verify {data.checker.verify_limit} full end-to-end · {data.checker.sweep_timeout_s}s TCP sweep ·
+            auto-disable after {data.checker.max_fails} fails ({data.checker.fail_cooldown_h}h account cooldown)
+          </p>
+          <RunLine label="Last cycle" run={data.last_runs.health_check} />
+          <RunLine label="Last auto-disable" run={data.last_runs.auto_disabled} />
+        </div>
+        <div className="space-y-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
+          <p className="text-xs font-bold">Auto-pool <span className="font-normal text-zinc-400">· refresh {data.pool.refresh_cadence}</span></p>
+          <p className="text-xs text-zinc-500">
+            Purge auto rows older than {data.pool.purge_after_days}d (manual rows immortal)
+            {data.pool.country ? <> · country lock: {data.pool.country}{data.pool.require_country ? " (required)" : ""}</> : " · no country lock"} ·{" "}
+            {c.manual} manual · {c.auto} auto
+          </p>
+          <RunLine label="Last refresh" run={data.last_runs.pool_refresh} />
+          <RunLine label="Last purge" run={data.last_runs.purge} />
+        </div>
+      </div>
+      {data.recent.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-xs font-bold">Recent activity</p>
+          <div className="space-y-0.5 font-mono text-[11px]">
+            {data.recent.map((r, i) => (
+              <p key={i} className="truncate text-zinc-500" title={r.message}>
+                <span className="text-zinc-400">{timeAgo(r.at)}</span>
+                {" · "}
+                <span className={r.level === "ERROR" || r.level === "CRITICAL" ? "text-red-500" : r.level === "WARNING" ? "text-amber-500" : ""}>{r.message.slice(0, 120)}</span>
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function ProxiesPage() {
   const qc = useQueryClient();
@@ -65,17 +159,15 @@ export default function ProxiesPage() {
         <button className="btn-ghost !py-1.5 text-xs" disabled={purgePool.isPending} onClick={() => { if (confirm("Delete long-dead auto-fetched proxies? Manual ones are never touched.")) purgePool.mutate({ url: "/proxies/pool/purge" }); }}>{purgePool.isPending ? "Purging…" : "Purge stale"}</button>
       </div>
       {(() => {
-        const auto = proxies.filter((p) => p.source && p.source !== "manual");
-        const healthy = proxies.filter((p) => p.is_healthy && p.is_active);
         const byCountry = new Map<string, number>();
         proxies.forEach((p) => { if (p.country) byCountry.set(p.country, (byCountry.get(p.country) ?? 0) + 1); });
-        return (
+        return byCountry.size > 0 ? (
           <p className="text-xs text-zinc-500">
-            {proxies.length} total · {healthy.length} healthy · {auto.length} auto-fetched
-            {byCountry.size > 0 && <> · {[...byCountry.entries()].map(([c, n]) => `${c}:${n}`).join(" ")}</>}
+            {[...byCountry.entries()].map(([c, n]) => `${c}:${n}`).join(" ")}
           </p>
-        );
+        ) : null;
       })()}
+      <PipelineStatus />
       <Card>
         <CardTitle>Add proxy</CardTitle>
         <div className="grid gap-3 md:grid-cols-5">
