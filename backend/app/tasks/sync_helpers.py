@@ -140,7 +140,11 @@ def rank_spare_proxies(candidates: list[dict], prefer_country: str = ""):
 
 
 def pick_spare_proxy(session, exclude_id: "int | None" = None, prefer_country: "str | None" = None):
-    """Highest-scoring spare proxy (active + healthy, not exclude_id)."""
+    """Highest-scoring spare proxy (active + healthy + proven, not exclude_id).
+
+    Proven = checked at least once. Fresh auto rows enter life unhealthy and
+    unchecked, so traffic never rides an unproven proxy.
+    """
     from sqlalchemy import func as _func
     from sqlalchemy import select as _select
 
@@ -149,7 +153,8 @@ def pick_spare_proxy(session, exclude_id: "int | None" = None, prefer_country: "
     q = (
         _select(Proxy, _func.count(Account.id))
         .outerjoin(Account, Account.proxy_id == Proxy.id)
-        .where(Proxy.is_active.is_(True), Proxy.is_healthy.is_(True))
+        .where(Proxy.is_active.is_(True), Proxy.is_healthy.is_(True),
+               Proxy.last_checked.is_not(None))
         .group_by(Proxy.id)
     )
     if exclude_id:
@@ -205,6 +210,12 @@ POOL_REQUIRE_COUNTRY_KEY = "pool_require_country"
 #: purge may reap them (only inactive ones, never manual rows).
 POOL_PURGE_AFTER_DAYS = 7
 POOL_PURGE_LIMIT = 500
+#: Auto rows that never went healthy a single time are stillborn: reaped this
+#: fast regardless of active state. A proxy that can't prove itself in 48h of
+#: 30-min check cycles is list filler, not capacity.
+POOL_STILLBORN_HOURS = 48
+#: Hard ceiling on auto rows; beyond it the worst go each refresh.
+POOL_MAX_AUTO = 500
 #: Safety caps per refresh cycle so one giant list can't flood the DB.
 POOL_MAX_NEW_PER_SOURCE = 300
 #: Health-check batching: one cycle covers this many stalest rows with a fast
@@ -247,20 +258,73 @@ def pool_allows_country(spec_country: str, source_default: str, pool_country: st
     return have == want
 
 
-def purge_stale_auto_proxies(session, max_age_days: int = POOL_PURGE_AFTER_DAYS, limit: int = POOL_PURGE_LIMIT) -> int:
-    """Delete long-dead AUTO pool rows. Manual rows are immortal. Returns count."""
+def purge_stale_auto_proxies(
+    session,
+    max_age_days: int = POOL_PURGE_AFTER_DAYS,
+    stillborn_hours: int = POOL_STILLBORN_HOURS,
+    limit: int = POOL_PURGE_LIMIT,
+) -> int:
+    """Delete dead AUTO pool rows. Manual rows are immortal. Returns count.
+
+    The pool lifecycle, in one place:
+      NEW (unchecked) -> first success -> HEALTHY (routable)
+      failure streak -> 5 fails -> DISABLED (+ accounts parked)
+      reaping, auto rows only:
+        - stillborn: never healthy once + created past grace -> delete
+        - retired: disabled + last check past retention -> delete
+    """
+    from sqlalchemy import and_ as _and
+    from sqlalchemy import or_ as _or
+
     from app.models import Proxy
 
-    cutoff = _now() - dt.timedelta(days=max_age_days)
+    now = _now()
     rows = (
         session.execute(
             select(Proxy).where(
                 Proxy.source.is_not(None),
                 Proxy.source != "manual",
-                Proxy.is_active.is_(False),
-                Proxy.last_checked.is_not(None),
-                Proxy.last_checked < cutoff,
+                _or(
+                    _and(
+                        Proxy.is_healthy.is_(False),
+                        Proxy.created_at < now - dt.timedelta(hours=stillborn_hours),
+                    ),
+                    _and(
+                        Proxy.is_active.is_(False),
+                        Proxy.last_checked.is_not(None),
+                        Proxy.last_checked < now - dt.timedelta(days=max_age_days),
+                    ),
+                ),
             ).limit(limit)
+        )
+    ).scalars().all()
+    for p in rows:
+        session.delete(p)
+    session.commit()
+    return len(rows)
+
+
+def cap_auto_pool(session, max_auto: int = POOL_MAX_AUTO) -> int:
+    """Hard ceiling on auto rows: beyond the cap the worst go first
+    (disabled, then most fails, then stalest). Manual rows never touched.
+    Returns the deleted count. Commits."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    from app.models import Proxy
+
+    auto = _select(Proxy).where(Proxy.source.is_not(None), Proxy.source != "manual")
+    n = session.execute(_select(_func.count()).select_from(auto.subquery())).scalar() or 0
+    excess = n - max_auto
+    if excess <= 0:
+        return 0
+    rows = (
+        session.execute(
+            auto.order_by(
+                Proxy.is_active.asc(),
+                Proxy.fail_count.desc(),
+                Proxy.last_checked.asc().nulls_first(),
+            ).limit(excess)
         )
     ).scalars().all()
     for p in rows:

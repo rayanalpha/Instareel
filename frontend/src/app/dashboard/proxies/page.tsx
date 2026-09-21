@@ -13,7 +13,7 @@ interface Pipeline {
   latency: { avg_ms: number | null; max_ms: number | null; measured: number };
   oldest_checked_at: string | null;
   checker: { cadence: string; batch: number; verify_limit: number; sweep_timeout_s: number; max_fails: number; fail_cooldown_h: number };
-  pool: { refresh_cadence: string; purge_after_days: number; country: string; require_country: boolean };
+  pool: { refresh_cadence: string; purge_after_days: number; stillborn_hours: number; max_auto: number; country: string; require_country: boolean };
   last_runs: { health_check: PipelineRun | null; pool_refresh: PipelineRun | null; purge: PipelineRun | null; auto_disabled: PipelineRun | null };
   recent: { at: string; level: string; message: string }[];
 }
@@ -74,7 +74,8 @@ function PipelineStatus() {
         <div className="space-y-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
           <p className="text-xs font-bold">Auto-pool <span className="font-normal text-zinc-400">· refresh {data.pool.refresh_cadence}</span></p>
           <p className="text-xs text-zinc-500">
-            Purge auto rows older than {data.pool.purge_after_days}d (manual rows immortal)
+            Purge auto rows older than {data.pool.purge_after_days}d (manual rows immortal) ·
+            never-healthy auto rows reaped after {data.pool.stillborn_hours}h · pool capped at {data.pool.max_auto}
             {data.pool.country ? <> · country lock: {data.pool.country}{data.pool.require_country ? " (required)" : ""}</> : " · no country lock"} ·{" "}
             {c.manual} manual · {c.auto} auto
           </p>
@@ -255,7 +256,7 @@ export default function ProxiesPage() {
           <div className="max-h-[420px] overflow-y-auto pr-1">
           {proxies.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
-              <span className={`h-2 w-2 shrink-0 rounded-full ${p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} />
+              <span className={`h-2 w-2 shrink-0 rounded-full ${p.last_checked == null ? "bg-amber-400" : p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} title={p.last_checked == null ? "new — not checked yet" : undefined} />
               <code className="min-w-0 break-all text-xs">{p.protocol}://{proxyHost(p.url)}</code>
               <span className="w-full text-zinc-500 sm:w-auto">{p.country ?? ""} · {p.latency_ms != null ? `${p.latency_ms}ms` : "—"} · fails {p.fail_count} · {p.source ?? "manual"}</span>
               {!p.is_active && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600 dark:bg-red-900/40">disabled</span>}

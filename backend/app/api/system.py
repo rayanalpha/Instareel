@@ -193,6 +193,7 @@ DEFAULT_SETTINGS = {
     "pool_country": ("", "proxy"),
     "pool_require_country": ("false", "proxy"),
     "pool_purge_after_days": ("7", "proxy"),
+    "pool_stillborn_hours": ("48", "proxy"),
 }
 
 MASKED = "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"

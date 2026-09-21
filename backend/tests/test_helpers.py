@@ -1211,12 +1211,77 @@ class TestPoolPolicy:
         assert purge_stale_auto_proxies(s, max_age_days=7) == 0
         assert purge_stale_auto_proxies(s, max_age_days=1) == 2
 
+    def test_purge_reaps_stillborn_but_keeps_proving(self):
+        import datetime as dt
+
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import purge_stale_auto_proxies
+
+        s = self._session()
+        now = dt.datetime.now(dt.timezone.utc)
+        old = now - dt.timedelta(days=3)
+        young = now - dt.timedelta(hours=1)
+
+        def mk(url, source, active, healthy, fails, created, checked):
+            p = Proxy(url=url, protocol=ProxyProtocol.http, source=source,
+                      is_active=active, is_healthy=healthy, fail_count=fails,
+                      created_at=created, last_checked=checked)
+            s.add(p)
+        mk("http://sick-old:1", "list-a", True, False, 3, old, young)    # reaped: never proved itself
+        mk("http://sick-young:1", "list-a", True, False, 3, young, young)  # kept: still proving
+        mk("http://good-old:1", "list-a", True, True, 0, old, young)       # kept: proven
+        mk("http://manual-old:1", "manual", True, False, 3, old, young)    # kept: immortal
+        s.commit()
+
+        assert purge_stale_auto_proxies(s) == 1
+        left = sorted(p.url for p in s.execute(select(Proxy)).scalars().all())
+        assert left == ["http://good-old:1", "http://manual-old:1", "http://sick-young:1"]
+
+    def test_cap_auto_pool_deletes_worst_first(self):
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import cap_auto_pool
+
+        s = self._session()
+
+        def mk(url, source, active, fails):
+            s.add(Proxy(url=url, protocol=ProxyProtocol.http, source=source,
+                        is_active=active, is_healthy=not active, fail_count=fails))
+        mk("http://dead:1", "x", False, 9)
+        mk("http://sick:1", "x", True, 4)
+        mk("http://good:1", "x", True, 0)
+        mk("http://manual:1", "manual", False, 9)
+        s.commit()
+
+        assert cap_auto_pool(s, max_auto=2) == 1
+        left = sorted(p.url for p in s.execute(select(Proxy)).scalars().all())
+        assert left == ["http://good:1", "http://manual:1", "http://sick:1"]
+
+    def test_pick_spare_skips_unchecked(self):
+        import datetime as dt
+
+        from app.models import Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import pick_spare_proxy
+
+        s = self._session()
+        p = Proxy(url="http://fresh:8080", protocol=ProxyProtocol.http,
+                  is_active=True, is_healthy=True, fail_count=0)
+        s.add(p)
+        s.commit()
+        pid = p.id
+        # Healthy-looking but never checked: not routable.
+        assert pick_spare_proxy(s) is None
+        p.last_checked = dt.datetime.now(dt.timezone.utc)
+        s.commit()
+        picked = pick_spare_proxy(s)
+        assert picked is not None and picked.id == pid
+
     def test_pool_defaults_shipped(self):
         from app.api.system import DEFAULT_SETTINGS
 
         assert DEFAULT_SETTINGS["pool_country"] == ("", "proxy")
         assert DEFAULT_SETTINGS["pool_require_country"] == ("false", "proxy")
         assert DEFAULT_SETTINGS["pool_purge_after_days"] == ("7", "proxy")
+        assert DEFAULT_SETTINGS["pool_stillborn_hours"] == ("48", "proxy")
 
 
 class TestCheckSessionReason:
@@ -1273,14 +1338,23 @@ class TestTrialUpload:
         mid, url, err = svc.upload_reel("u", "p", "v.mp4", "cap", trial=True, trial_strategy="auto")
         assert err == "" and mid == "111" and url == "https://www.instagram.com/reel/Dxyz/"
         clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
-        assert clips == [{"trial": True, "trial_graduation_strategy": "auto"}]
+        assert clips == [{"trial": True, "trial_graduation_strategy": "auto", "thumbnail": None}]
 
     def test_regular_untouched(self, monkeypatch):
         svc = self._svc(monkeypatch)
         mid, _, err = svc.upload_reel("u", "p", "v.mp4", "cap")
         assert err == "" and mid == "111"
         clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
-        assert clips == [{}]
+        assert clips == [{"thumbnail": None}]
+
+    def test_thumbnail_path_forwarded(self, monkeypatch):
+        from pathlib import Path
+
+        svc = self._svc(monkeypatch)
+        mid, _, err = svc.upload_reel("u", "p", "v.mp4", "cap", thumbnail_path="/tmp/cover.jpg")
+        assert err == "" and mid == "111"
+        clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
+        assert clips == [{"thumbnail": Path("/tmp/cover.jpg")}]
 
     def test_trial_rejection_falls_back_once(self, monkeypatch):
         svc = self._svc(monkeypatch)
@@ -1289,7 +1363,7 @@ class TestTrialUpload:
         assert err == "" and mid == "111"
         clips = [c[1] for c in _FakeIGClient.made[-1].calls if c[0] == "clip"]
         # First attempt trial, fallback regular — exactly two uploads, one post.
-        assert clips[0].get("trial") is True and clips[1] == {}
+        assert clips[0].get("trial") is True and clips[1] == {"thumbnail": None}
 
     def test_idless_upload_never_marked_posted(self, monkeypatch):
         import instagrapi

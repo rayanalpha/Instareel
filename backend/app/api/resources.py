@@ -291,6 +291,7 @@ async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession =
     from app.models import Setting, SystemLog
     from app.tasks.sync_helpers import (
         MAX_PROXY_FAILS,
+        POOL_MAX_AUTO,
         PROXY_CHECK_BATCH,
         PROXY_FAIL_COOLDOWN_HOURS,
         PROXY_VERIFY_LIMIT,
@@ -335,6 +336,10 @@ async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession =
         purge_days = int(settings.get("pool_purge_after_days", "7"))
     except ValueError:
         purge_days = 7
+    try:
+        stillborn_hours = int(settings.get("pool_stillborn_hours", "48"))
+    except ValueError:
+        stillborn_hours = 48
     return {
         "counts": counts,
         "latency": {
@@ -354,6 +359,8 @@ async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession =
         "pool": {
             "refresh_cadence": "every 3 h",
             "purge_after_days": purge_days,
+            "stillborn_hours": stillborn_hours,
+            "max_auto": POOL_MAX_AUTO,
             "country": settings.get("pool_country", ""),
             "require_country": settings.get("pool_require_country", "false").lower() == "true",
         },
@@ -624,7 +631,12 @@ async def purge_pool_now(request: Request, _: str = Depends(get_current_admin)):
                 days = int(get_setting(s, "pool_purge_after_days", "7"))
             except ValueError:
                 days = 7
-            return purge_stale_auto_proxies(s, max_age_days=min(max(days, 1), 30))
+            try:
+                stillborn = int(get_setting(s, "pool_stillborn_hours", "48"))
+            except ValueError:
+                stillborn = 48
+            return purge_stale_auto_proxies(
+                s, max_age_days=min(max(days, 1), 30), stillborn_hours=max(stillborn, 1))
 
     # The purge helper is sync (same session style as the celery tasks).
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

@@ -342,6 +342,10 @@ def refresh_proxy_pool():
                             password_enc=encrypt_secret(spec["password"]) if spec["password"] else None,
                             country=spec["country"] or (country or None),
                             source=name,
+                            # NEW and unproven: unhealthy until the first
+                            # successful check, so traffic never rides it
+                            # blind and the UI shows it as new, not dead.
+                            is_healthy=False,
                         ))
                         have.add(key)
                         made += 1
@@ -364,12 +368,18 @@ def refresh_proxy_pool():
                 purge_after = int(sched.get_setting(s, "pool_purge_after_days", "7"))
             except ValueError:
                 purge_after = 7
-            purged = purge_stale_auto_proxies(s, max_age_days=min(max(purge_after, 1), 30))
+            try:
+                stillborn = int(sched.get_setting(s, "pool_stillborn_hours", "48"))
+            except ValueError:
+                stillborn = 48
+            purged = purge_stale_auto_proxies(
+                s, max_age_days=min(max(purge_after, 1), 30), stillborn_hours=max(stillborn, 1))
+            capped = sched.cap_auto_pool(s)
         from app.tasks.sync_helpers import publish_sync
 
-        log_event_sync("INFO", "proxy", f"Pool refresh: {total_added} added, {purged} stale purged")
-        publish_sync("proxy_pool_update", {"added": total_added, "purged": purged})
-        return {"added": total_added, "purged": purged, "sources": per_source}
+        log_event_sync("INFO", "proxy", f"Pool refresh: {total_added} added, {purged} stale purged, {capped} over cap")
+        publish_sync("proxy_pool_update", {"added": total_added, "purged": purged, "capped": capped})
+        return {"added": total_added, "purged": purged, "capped": capped, "sources": per_source}
     except Exception:  # noqa: BLE001
         log.exception("refresh_proxy_pool failed")
         return {"error": "failed"}
