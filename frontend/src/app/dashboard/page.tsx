@@ -81,8 +81,8 @@ export default function DashboardPage() {
           {recent.length === 0 ? (
             <EmptyState title="No posts yet" hint="Upload a video and create a schedule rule to get started." />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+              <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase text-zinc-400">
                     <th className="py-2 pr-4">Account</th>

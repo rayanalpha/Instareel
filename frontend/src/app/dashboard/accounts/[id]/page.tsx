@@ -64,7 +64,7 @@ export default function AccountDetailPage() {
         <h1 className="text-xl font-extrabold tracking-tight">@{acc.username}</h1>
         <StatusBadge status={acc.status} />
       </div>
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         {[["Posts", stats?.posts], ["Views", fmt(stats?.views)], ["Likes", fmt(stats?.likes)], ["Engagement", `${stats?.avg_engagement ?? 0}%`]].map(([k, v]) => (
           <Card key={k as string}><p className="text-2xl font-extrabold">{v as string}</p><p className="text-xs text-zinc-500">{k}</p></Card>
         ))}
@@ -133,7 +133,7 @@ export default function AccountDetailPage() {
         {(stats?.recent ?? []).length === 0
           ? <p className="text-sm text-zinc-500">No posts yet.</p>
           : (stats.recent as any[]).map((p: any) => (
-            <div key={p.id} className="flex items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
+            <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
               <span>Post #{p.id}</span>
               <StatusBadge status={p.status} />
               <span className="ml-auto text-zinc-500">{fmt(p.views_7d)} views · {timeAgo(p.posted_at)}</span>

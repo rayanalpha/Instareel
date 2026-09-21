@@ -171,9 +171,9 @@ export default function VideoDetailPage() {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
-        <div className="mb-2 flex items-center gap-2">
-          <CardTitle>#{video.id} · {video.original_filename}</CardTitle>
-          <StatusBadge status={video.status} />
+        <div className="mb-2 flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1 truncate"><CardTitle>#{video.id} · {video.original_filename}</CardTitle></div>
+          <span className="shrink-0"><StatusBadge status={video.status} /></span>
         </div>
         {previewUrl ? (
           <LivePreview

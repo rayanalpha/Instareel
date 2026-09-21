@@ -78,8 +78,8 @@ export default function AudioPage() {
             const s = byName.get(t.name);
             return (
               <Card key={t.id}>
-                <div className="flex items-center gap-2">
-                  <strong>{t.name}</strong>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <strong className="min-w-0 truncate">{t.name}</strong>
                   <span className="text-xs text-zinc-500">{t.duration ? `${t.duration.toFixed(0)}s` : ""} · lvl {t.music_volume}{t.duck_original ? " · ducked" : ""}</span>
                   <span className="ml-auto text-xs text-zinc-500">
                     {s ? `${s.posts} posts · ${s.avg_engagement}% eng. · ${s.views} views` : `used ${t.use_count}×`}

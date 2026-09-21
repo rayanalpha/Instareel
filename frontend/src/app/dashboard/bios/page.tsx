@@ -83,7 +83,7 @@ export default function BiosPage() {
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <Field label="Bio text"><textarea className="input" rows={2} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /></Field>
-          <div className="flex items-end gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <Field label="Rotate every (days)"><input className="input" type="number" min={1} max={365} value={form.rotation_interval_days} onChange={(e) => setForm({ ...form, rotation_interval_days: Number(e.target.value) })} /></Field>
             <button className="btn-primary" disabled={!form.account_id || !form.text} onClick={() => { create.mutate({ url: "/bios", body: { account_id: Number(form.account_id), text: form.text, link_url: form.link_url, full_name: form.full_name, make_private: privacyBody(form.privacy), rotation_interval_days: form.rotation_interval_days } }); setForm({ account_id: "", text: "", link_url: "", full_name: "", privacy: "", rotation_interval_days: 14 }); }}>Add</button>
           </div>

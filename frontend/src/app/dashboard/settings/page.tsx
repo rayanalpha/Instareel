@@ -22,7 +22,7 @@ export default function SettingsPage() {
           {items.map((s) => (
             <form
               key={s.key}
-              className="flex items-center gap-2 border-t border-zinc-100 py-2 first:border-0 dark:border-zinc-800"
+              className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 first:border-0 dark:border-zinc-800"
               onSubmit={(e) => {
                 e.preventDefault();
                 const fd = new FormData(e.target as HTMLFormElement);
@@ -33,7 +33,7 @@ export default function SettingsPage() {
                 <p className="font-mono text-xs font-semibold">{s.key}</p>
                 <p className="truncate text-xs text-zinc-500">{s.is_sensitive ? "(sensitive â€” masked)" : s.value || "(empty)"}</p>
               </div>
-              <input name="value" className="input !w-48" placeholder="new value" />
+              <input name="value" className="input min-w-[140px] flex-1 sm:flex-none sm:!w-48" placeholder="new value" />
               <button className="btn-ghost !px-3 !py-1.5 text-xs">Save</button>
             </form>
           ))}

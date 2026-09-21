@@ -15,7 +15,7 @@ export default function PostsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-extrabold tracking-tight">Posts</h1>
         <select className="input ml-auto !w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All statuses</option>
@@ -39,8 +39,8 @@ export default function PostsPage() {
         <EmptyState title="No posts" hint="Schedule rules create posts automatically every minute." />
       ) : (
         <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                   <tr className="text-left text-xs uppercase text-zinc-400">
                     <th className="py-2 pr-4">Post</th><th className="py-2 pr-4">Status</th>

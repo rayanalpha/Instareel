@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("card p-5", className)}>{children}</div>;
+  return <div className={cn("card p-4 sm:p-5", className)}>{children}</div>;
 }
 
 export function CardTitle({ children }: { children: ReactNode }) {

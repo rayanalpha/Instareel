@@ -38,7 +38,8 @@ export default function SchedulePage() {
 
       <Card>
         <CardTitle>Weekly calendar</CardTitle>
-        <div className="grid grid-cols-8 gap-1 text-center text-xs">
+        <div className="overflow-x-auto">
+        <div className="grid min-w-[520px] grid-cols-8 gap-1 text-center text-xs">
           <div />
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <div key={d} className="font-semibold text-zinc-500">{d}</div>)}
           {HOURS.filter((h) => list.some((r) => r.hour === h)).map((h) => (
@@ -56,6 +57,7 @@ export default function SchedulePage() {
               })}
             </Fragment>
           ))}
+        </div>
         </div>
         {list.length === 0 && !isLoading && <p className="mt-2 text-sm text-zinc-500">No rules yet — every active hour shows here once added.</p>}
       </Card>

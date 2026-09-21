@@ -32,11 +32,11 @@ export function toast(kind: ToastKind, message: string) {
 
 const STYLES: Record<ToastKind, string> = {
   success:
-    "border-emerald-500/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
+    "border-emerald-500 bg-emerald-50/95 text-emerald-900 dark:border-emerald-400 dark:bg-emerald-950 dark:text-emerald-100",
   error:
-    "border-red-500/40 bg-red-50 text-red-900 dark:bg-red-900/40 dark:text-red-100",
+    "border-red-500 bg-red-50/95 text-red-900 dark:border-red-400 dark:bg-red-950 dark:text-red-100",
   info:
-    "border-sky-500/40 bg-sky-50 text-sky-900 dark:bg-sky-900/40 dark:text-sky-100",
+    "border-sky-500 bg-sky-50/95 text-sky-900 dark:border-sky-400 dark:bg-sky-950 dark:text-sky-100",
 };
 
 export function Toaster() {
@@ -44,11 +44,12 @@ export function Toaster() {
   const remove = useToasts((s) => s.remove);
   if (items.length === 0) return null;
   return (
-    <div className="fixed right-4 top-4 z-50 flex w-80 max-w-[90vw] flex-col gap-2">
+    <div className="fixed inset-x-4 top-4 z-[100] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-80 sm:max-w-[90vw]">
       {items.map((t) => (
         <div
           key={t.id}
-          className={`flex items-start gap-2 rounded-xl border p-3 text-sm shadow-sm ${STYLES[t.kind]}`}
+          role="status"
+          className={`flex items-start gap-2 rounded-xl border-2 p-3 text-sm shadow-xl backdrop-blur-md ${STYLES[t.kind]}`}
         >
           <span className="flex-1 break-words">{t.message}</span>
           <button
