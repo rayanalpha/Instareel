@@ -219,10 +219,13 @@ POOL_MAX_AUTO = 500
 #: Safety caps per refresh cycle so one giant list can't flood the DB.
 POOL_MAX_NEW_PER_SOURCE = 300
 #: Health-check batching: one cycle covers this many stalest rows with a fast
-#: TCP sweep, and fully verifies at most this many survivors. Bounds the task
-#: to minutes so posting ticks on the solo worker never starve.
+#: TCP sweep, and fully verifies at most this many survivors. The sweep and
+#: verify fans run on thread pools (IO-bound work); DB writes stay strictly
+#: sequential so SQLite never sees concurrent writers.
 PROXY_CHECK_BATCH = 60
+PROXY_CHECK_THREADS = 20
 PROXY_VERIFY_LIMIT = 20
+PROXY_VERIFY_THREADS = 10
 SWEEP_TCP_TIMEOUT = 3
 
 

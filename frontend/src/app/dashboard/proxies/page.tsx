@@ -12,7 +12,7 @@ interface Pipeline {
   counts: { total: number; healthy: number; dead: number; disabled: number; never_checked: number; manual: number; auto: number };
   latency: { avg_ms: number | null; max_ms: number | null; measured: number };
   oldest_checked_at: string | null;
-  checker: { cadence: string; batch: number; verify_limit: number; sweep_timeout_s: number; max_fails: number; fail_cooldown_h: number };
+  checker: { cadence: string; batch: number; threads: number; verify_limit: number; verify_threads: number; sweep_timeout_s: number; max_fails: number; fail_cooldown_h: number };
   pool: { refresh_cadence: string; purge_after_days: number; stillborn_hours: number; max_auto: number; country: string; require_country: boolean };
   last_runs: { health_check: PipelineRun | null; pool_refresh: PipelineRun | null; purge: PipelineRun | null; auto_disabled: PipelineRun | null };
   recent: { at: string; level: string; message: string }[];
@@ -65,7 +65,7 @@ function PipelineStatus() {
         <div className="space-y-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
           <p className="text-xs font-bold">Health checker <span className="font-normal text-zinc-400">· {data.checker.cadence}</span></p>
           <p className="text-xs text-zinc-500">
-            Batch {data.checker.batch} oldest-first · verify {data.checker.verify_limit} full end-to-end · {data.checker.sweep_timeout_s}s TCP sweep ·
+            Batch {data.checker.batch} oldest-first · ×{data.checker.threads} threads · verify {data.checker.verify_limit} full end-to-end (×{data.checker.verify_threads}) · {data.checker.sweep_timeout_s}s TCP sweep ·
             auto-disable after {data.checker.max_fails} fails ({data.checker.fail_cooldown_h}h account cooldown)
           </p>
           <RunLine label="Last cycle" run={data.last_runs.health_check} />

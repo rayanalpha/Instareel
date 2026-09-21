@@ -293,8 +293,10 @@ async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession =
         MAX_PROXY_FAILS,
         POOL_MAX_AUTO,
         PROXY_CHECK_BATCH,
+        PROXY_CHECK_THREADS,
         PROXY_FAIL_COOLDOWN_HOURS,
         PROXY_VERIFY_LIMIT,
+        PROXY_VERIFY_THREADS,
         SWEEP_TCP_TIMEOUT,
     )
 
@@ -351,7 +353,9 @@ async def proxy_pipeline(_: str = Depends(get_current_admin), db: AsyncSession =
         "checker": {
             "cadence": "every 30 min",
             "batch": PROXY_CHECK_BATCH,
+            "threads": PROXY_CHECK_THREADS,
             "verify_limit": PROXY_VERIFY_LIMIT,
+            "verify_threads": PROXY_VERIFY_THREADS,
             "sweep_timeout_s": SWEEP_TCP_TIMEOUT,
             "max_fails": MAX_PROXY_FAILS,
             "fail_cooldown_h": PROXY_FAIL_COOLDOWN_HOURS,

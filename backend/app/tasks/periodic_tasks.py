@@ -179,8 +179,14 @@ def check_bio_rotation():
 
 @celery.task(name="tasks.proxy_tasks.check_all_proxies")
 def check_all_proxies():
-    import random
-    import time
+    """Health-check cycle: oldest-first batch, threaded sweep + verify.
+
+    Network runs on thread pools (a 60-row batch drains in about a minute
+    instead of a quarter hour); every DB write stays sequential in this
+    thread so SQLite never sees concurrent writers. Disabled rows are
+    included so recoveries surface for re-enable.
+    """
+    import concurrent.futures
     from types import SimpleNamespace
 
     from sqlalchemy import select
@@ -189,56 +195,70 @@ def check_all_proxies():
     from app.models import Proxy
     from app.services.proxy_service import check_proxy_sync
     from app.tasks.sync_helpers import log_event_sync, record_proxy_check
+    from app.tasks.sync_helpers import (
+        PROXY_CHECK_BATCH,
+        PROXY_CHECK_THREADS,
+        PROXY_VERIFY_LIMIT,
+        PROXY_VERIFY_THREADS,
+        SWEEP_TCP_TIMEOUT,
+        due_for_check,
+    )
+
+    def _run_pool(snaps, workers, **check_kw):
+        """Network-only fan-out: returns {pid: (ok, latency)}; a proxy whose
+        probe itself explodes counts as failed, never kills the cycle."""
+        out = {}
+
+        def _probe(snap):
+            try:
+                probe = SimpleNamespace(id=snap[0], url=snap[1], username=snap[2], password_enc=snap[3])
+                return snap[0], check_proxy_sync(probe, **check_kw)
+            except Exception as exc:  # noqa: BLE001 — one bad row must not kill the cycle
+                log.exception("proxy probe #%s failed", snap[0])
+                return snap[0], (False, None)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for pid, res in pool.map(_probe, snaps):
+                out[pid] = res
+        return out
 
     try:
-        # Small jitter so the check doesn't fire at the exact same second as
-        # the posting tick every half hour (less machine-like fingerprint).
-        time.sleep(random.uniform(0, 60))
-        from app.tasks.sync_helpers import (
-            PROXY_CHECK_BATCH,
-            PROXY_VERIFY_LIMIT,
-            SWEEP_TCP_TIMEOUT,
-            due_for_check,
-        )
-
         with SyncSessionLocal() as s:
-            # Oldest-checked first (never-checked lead), capped per cycle —
-            # a 300-row pool drains over several 30-min ticks instead of
-            # pinning the solo worker for a quarter hour and stalling posts.
-            # Disabled rows are included so recoveries surface for re-enable.
+            # Oldest-checked first (never-checked lead), capped per cycle.
             ids = due_for_check(s, PROXY_CHECK_BATCH)
-        swept, verified = 0, 0
-        for pid in ids:
-            # Snapshot credentials first, then check WITHOUT holding the DB
+            # Snapshot credentials once, then check WITHOUT holding the DB
             # transaction open — network checks must never pin a connection
             # (SQLite lock contention / PG idle-in-transaction).
+            snaps = []
+            for pid in ids:
+                p = s.get(Proxy, pid)
+                if p is not None:
+                    snaps.append((p.id, p.url, p.username, p.password_enc))
+        # Tier 1 — fast TCP sweep (seconds, not tens of seconds).
+        swept, verified = 0, 0
+        survivors = []
+        for pid, (ok, _lat) in _run_pool(snaps, PROXY_CHECK_THREADS,
+                                         tcp_timeout=SWEEP_TCP_TIMEOUT, sweep_only=True).items():
+            swept += 1
+            if ok:
+                survivors.append(pid)
+                continue
             with SyncSessionLocal() as s:
                 p = s.get(Proxy, pid)
-                if not p:
-                    continue
-                snap = (p.url, p.username, p.password_enc)
-            probe = SimpleNamespace(id=pid, url=snap[0], username=snap[1], password_enc=snap[2])
-            # Tier 1 — fast TCP sweep (seconds, not tens of seconds).
-            ok, latency = check_proxy_sync(probe, tcp_timeout=SWEEP_TCP_TIMEOUT, sweep_only=True)
-            swept += 1
-            if not ok:
-                with SyncSessionLocal() as s:
-                    p = s.get(Proxy, pid)
-                    if p is not None:
-                        record_proxy_check(s, p, False, error="tcp sweep failed")
-                continue
-            # Tier 2 — full end-to-end, but only for the first survivors each
-            # cycle; the rest wait for the next tick (their sweep already
-            # proved TCP liveness, so streaks stay honest).
-            if verified >= PROXY_VERIFY_LIMIT:
-                continue
-            ok, latency = check_proxy_sync(probe)
+                if p is not None:
+                    record_proxy_check(s, p, False, error="tcp sweep failed")
+        # Tier 2 — full end-to-end, but only for the first survivors each
+        # cycle; the rest wait for the next tick (their sweep already
+        # proved TCP liveness, so streaks stay honest).
+        verify_ids = set(survivors[:PROXY_VERIFY_LIMIT])
+        verify_snaps = [sn for sn in snaps if sn[0] in verify_ids]
+        for pid, (ok, latency) in _run_pool(verify_snaps, PROXY_VERIFY_THREADS).items():
             verified += 1
             # One shared recorder for checker AND live-traffic observations —
             # same streak, same threshold, same parking behavior.
             with SyncSessionLocal() as s:
                 p = s.get(Proxy, pid)
-                if not p:
+                if p is None:
                     continue
                 record_proxy_check(s, p, ok, latency_ms=latency,
                                    error="" if ok else "periodic check failed")

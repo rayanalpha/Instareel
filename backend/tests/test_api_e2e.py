@@ -375,6 +375,7 @@ class TestResources:
         assert body["counts"]["total"] == 1
         assert body["counts"]["never_checked"] == 1
         assert body["checker"]["batch"] == 60
+        assert body["checker"]["threads"] == 20
         assert body["checker"]["max_fails"] == 5
         assert body["pool"]["purge_after_days"] >= 1
         assert set(body["last_runs"]) == {"health_check", "pool_refresh", "purge", "auto_disabled"}

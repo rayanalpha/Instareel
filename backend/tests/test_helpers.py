@@ -1275,6 +1275,47 @@ class TestPoolPolicy:
         picked = pick_spare_proxy(s)
         assert picked is not None and picked.id == pid
 
+    def test_check_all_threaded_completes(self, monkeypatch, tmp_path):
+        import app.database as dbmod
+        from sqlalchemy import create_engine, select
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+        from app.models import Proxy, ProxyProtocol
+        from app.services import proxy_service
+        from app.tasks import periodic_tasks
+
+        engine = create_engine(f"sqlite:///{tmp_path}/check.db")
+        Base.metadata.create_all(engine)
+        maker = sessionmaker(bind=engine)
+        monkeypatch.setattr(dbmod, "SyncSessionLocal", maker)
+
+        s = maker()
+        bad = Proxy(url="http://bad:1", protocol=ProxyProtocol.http, source="x")
+        g1 = Proxy(url="http://good1:1", protocol=ProxyProtocol.http, source="x")
+        g2 = Proxy(url="http://good2:1", protocol=ProxyProtocol.http, source="x")
+        s.add_all([bad, g1, g2])
+        s.commit()
+        bad_id, g1_id = bad.id, g1.id
+
+        def fake_check(probe, tcp_timeout=10, e2e_timeout=15, sweep_only=False):
+            if probe.id == bad_id:
+                return False, None
+            return True, 7
+
+        monkeypatch.setattr(proxy_service, "check_proxy_sync", fake_check)
+
+        assert periodic_tasks.check_all_proxies() == {"swept": 3, "verified": 2}
+        # Fresh session: this test's own session cached pre-task state.
+        s.close()
+        s = maker()
+        rows = {p.url: p for p in s.execute(select(Proxy)).scalars().all()}
+        assert (rows["http://bad:1"].is_healthy, rows["http://bad:1"].fail_count) == (False, 1)
+        assert rows["http://bad:1"].last_error == "tcp sweep failed"
+        for url in ("http://good1:1", "http://good2:1"):
+            assert (rows[url].is_healthy, rows[url].fail_count, rows[url].latency_ms) == (True, 0, 7)
+        assert rows["http://good1:1"].id == g1_id
+
     def test_pool_defaults_shipped(self):
         from app.api.system import DEFAULT_SETTINGS
 
