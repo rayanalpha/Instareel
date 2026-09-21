@@ -85,7 +85,9 @@ export function useBios() {
   return useQuery({ queryKey: ["bios"], queryFn: () => get("/bios") });
 }
 export function useProxies() {
-  return useQuery({ queryKey: ["proxies"], queryFn: () => get("/proxies") });
+  // No WS-only staleness: the checker lands every ~30 min and realtime can
+  // drop, so poll like the other live lists (the pipeline card polls 20s).
+  return useQuery({ queryKey: ["proxies"], queryFn: () => get("/proxies"), refetchInterval: 30000 });
 }
 export function useProxySources() {
   return useQuery({ queryKey: ["proxy-sources"], queryFn: () => get("/proxies/sources") });

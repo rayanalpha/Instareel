@@ -274,12 +274,17 @@ def purge_stale_auto_proxies(
       failure streak -> 5 fails -> DISABLED (+ accounts parked)
       reaping, auto rows only:
         - stillborn: never healthy once + created past grace -> delete
-        - retired: disabled + last check past retention -> delete
+        - proven dead: disabled + unhealthy (5 consecutive fails with no
+          healing success in between) -> delete at the next cycle
+        - retired: disabled leftovers past retention -> delete
+    Proven-dead rows go immediately: the 5-fail streak IS the proof, keeping
+    them longer only clutters the pool. Parked accounts are unlinked first
+    so no dangling proxy_id survives the delete.
     """
     from sqlalchemy import and_ as _and
     from sqlalchemy import or_ as _or
 
-    from app.models import Proxy
+    from app.models import Account, Proxy
 
     now = _now()
     rows = (
@@ -294,6 +299,10 @@ def purge_stale_auto_proxies(
                     ),
                     _and(
                         Proxy.is_active.is_(False),
+                        Proxy.is_healthy.is_(False),
+                    ),
+                    _and(
+                        Proxy.is_active.is_(False),
                         Proxy.last_checked.is_not(None),
                         Proxy.last_checked < now - dt.timedelta(days=max_age_days),
                     ),
@@ -301,9 +310,15 @@ def purge_stale_auto_proxies(
             ).limit(limit)
         )
     ).scalars().all()
-    for p in rows:
-        session.delete(p)
-    session.commit()
+    if rows:
+        gone_ids = [p.id for p in rows]
+        for acc in session.execute(
+            select(Account).where(Account.proxy_id.in_(gone_ids))
+        ).scalars().all():
+            acc.proxy_id = None
+        for p in rows:
+            session.delete(p)
+        session.commit()
     return len(rows)
 
 

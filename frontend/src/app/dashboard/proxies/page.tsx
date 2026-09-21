@@ -74,8 +74,8 @@ function PipelineStatus() {
         <div className="space-y-1 rounded-lg border border-zinc-100 p-2 dark:border-zinc-800">
           <p className="text-xs font-bold">Auto-pool <span className="font-normal text-zinc-400">· refresh {data.pool.refresh_cadence}</span></p>
           <p className="text-xs text-zinc-500">
-            Purge auto rows older than {data.pool.purge_after_days}d (manual rows immortal) ·
-            never-healthy auto rows reaped after {data.pool.stillborn_hours}h · pool capped at {data.pool.max_auto}
+            Dead auto rows deleted outright (5 straight fails) · never-healthy reaped after {data.pool.stillborn_hours}h ·
+            disabled leftovers past {data.pool.purge_after_days}d · manual rows immortal · pool capped at {data.pool.max_auto}
             {data.pool.country ? <> · country lock: {data.pool.country}{data.pool.require_country ? " (required)" : ""}</> : " · no country lock"} ·{" "}
             {c.manual} manual · {c.auto} auto
           </p>
@@ -125,6 +125,25 @@ export default function ProxiesPage() {
   const [impResult, setImpResult] = useState<ProxyImportResult | null>(null);
   const [impError, setImpError] = useState("");
   const proxies = (data ?? []) as Proxy[];
+  // Dead/disabled rows are hidden by default — the pool auto-reaps them
+  // (stillborn/proven-dead), so the list shows what's actually usable.
+  const [filter, setFilter] = useState<"usable" | "new" | "bad" | "off" | "all">("usable");
+  const isNew = (p: Proxy) => p.last_checked == null;
+  const isBad = (p: Proxy) => !isNew(p) && !p.is_healthy && p.is_active;
+  const isOff = (p: Proxy) => !p.is_active;
+  const shown = proxies.filter((p) =>
+    filter === "all" ? true
+    : filter === "new" ? isNew(p)
+    : filter === "bad" ? isBad(p)
+    : filter === "off" ? isOff(p)
+    : p.is_active && (p.is_healthy || isNew(p)),
+  );
+  const counts = {
+    usable: proxies.filter((p) => p.is_active && (p.is_healthy || isNew(p))).length,
+    new: proxies.filter(isNew).length,
+    bad: proxies.filter(isBad).length,
+    off: proxies.filter(isOff).length,
+  };
 
   async function bulkImport() {
     if (!impFile) return;
@@ -249,12 +268,23 @@ export default function ProxiesPage() {
       </Card>
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : proxies.length === 0 ? <EmptyState title="No proxies" hint="Assign one proxy per IG account for best deliverability." /> : (
         <Card>
-          <div className="mb-1 flex items-center gap-2">
-            <CardTitle>Proxies ({proxies.length})</CardTitle>
-            <span className="ml-auto text-[11px] text-zinc-400">scroll inside ↓</span>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <CardTitle>Proxies ({shown.length}/{proxies.length})</CardTitle>
+            <span className="ml-auto flex gap-1">
+              {(["usable", "new", "bad", "off", "all"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${filter === f ? "bg-emerald-600 text-white" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}
+                >
+                  {f === "usable" ? `Usable ${counts.usable}` : f === "new" ? `New ${counts.new}` : f === "bad" ? `Dead ${counts.bad}` : f === "off" ? `Off ${counts.off}` : `All ${proxies.length}`}
+                </button>
+              ))}
+            </span>
           </div>
           <div className="max-h-[420px] overflow-y-auto pr-1">
-          {proxies.map((p) => (
+          {shown.length === 0 && <p className="py-3 text-center text-xs text-zinc-400">Nothing in this view — try another filter.</p>}
+          {shown.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
               <span className={`h-2 w-2 shrink-0 rounded-full ${p.last_checked == null ? "bg-amber-400" : p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} title={p.last_checked == null ? "new — not checked yet" : undefined} />
               <code className="min-w-0 break-all text-xs">{p.protocol}://{proxyHost(p.url)}</code>

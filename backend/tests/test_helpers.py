@@ -1059,19 +1059,19 @@ class TestAutoPool:
             s.add(p)
             return p
 
-        mk("http://old-auto:1", "list-a", False, old)     # reaped
+        mk("http://old-auto:1", "list-a", False, old)     # reaped: proven dead
         mk("http://manual:1", "manual", False, old)       # immortal
         mk("http://legacy:1", None, False, old)           # pre-feature rows immortal
-        mk("http://fresh:1", "list-a", False, fresh)      # too young
+        mk("http://fresh:1", "list-a", False, fresh)      # reaped: disabled+unhealthy needs no age gate
         mk("http://active:1", "list-a", True, old)        # active rows kept
-        mk("http://never:1", "list-a", False, None)       # unchecked kept
+        mk("http://new:1", "list-a", True, None)          # brand-new rows kept (still proving)
         s.commit()
 
-        assert purge_stale_auto_proxies(s) == 1
+        assert purge_stale_auto_proxies(s) == 2
         left = sorted(p.url for p in s.execute(select(Proxy)).scalars().all())
         assert left == [
-            "http://active:1", "http://fresh:1", "http://legacy:1",
-            "http://manual:1", "http://never:1",
+            "http://active:1", "http://legacy:1",
+            "http://manual:1", "http://new:1",
         ]
 
 
@@ -1202,14 +1202,40 @@ class TestPoolPolicy:
 
         s = self._session()
         old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=2)
+        # Proven dead (disabled+unhealthy): gone even under a 30-day policy.
         s.add(Proxy(url="http://gone:1", protocol=ProxyProtocol.http, source="x",
                     is_active=False, is_healthy=False, fail_count=9, last_checked=old))
-        s.add(Proxy(url="http://fresh:1", protocol=ProxyProtocol.http, source="x",
-                    is_active=False, is_healthy=False, fail_count=9, last_checked=old))
+        # Disabled but last known healthy: only the retention arm takes it.
+        s.add(Proxy(url="http://retired:1", protocol=ProxyProtocol.http, source="x",
+                    is_active=False, is_healthy=True, fail_count=0, last_checked=old))
         s.commit()
-        # Default 7d keeps both; a 1-day policy reaps both.
-        assert purge_stale_auto_proxies(s, max_age_days=7) == 0
-        assert purge_stale_auto_proxies(s, max_age_days=1) == 2
+        assert purge_stale_auto_proxies(s, max_age_days=30) == 1
+        assert purge_stale_auto_proxies(s, max_age_days=1) == 1
+
+    def test_purge_unlinks_parked_accounts_and_spares_manual(self):
+        import datetime as dt
+
+        from app.models import Account, Proxy, ProxyProtocol
+        from app.tasks.sync_helpers import purge_stale_auto_proxies
+
+        s = self._session()
+        old = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=3)
+        dead = Proxy(url="http://dead:1", protocol=ProxyProtocol.http, source="x",
+                     is_active=False, is_healthy=False, fail_count=5,
+                     created_at=old, last_checked=old)
+        manual = Proxy(url="http://manual:1", protocol=ProxyProtocol.http, source="manual",
+                       is_active=False, is_healthy=False, fail_count=5,
+                       created_at=old, last_checked=old)
+        s.add_all([dead, manual])
+        s.flush()
+        s.add(Account(username="parked", password_enc="x", proxy_id=dead.id))
+        s.commit()
+
+        assert purge_stale_auto_proxies(s) == 1
+        left = sorted(p.url for p in s.execute(select(Proxy)).scalars().all())
+        assert left == ["http://manual:1"]
+        acc = s.execute(select(Account)).scalar_one()
+        assert acc.proxy_id is None
 
     def test_purge_reaps_stillborn_but_keeps_proving(self):
         import datetime as dt
