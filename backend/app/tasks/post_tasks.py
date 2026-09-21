@@ -243,7 +243,6 @@ def execute_post(self, post_id: int):
                 touch_account(False, error)
                 log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {error}")
                 raise self.retry(exc=RuntimeError(error), countdown=countdown)
-            set_status(PostStatus.failed, fail_reason=error[:2000], retry_count=retries + 1)
             touch_account(False, error)
             if proxy_id is not None and (
                 kind == "throttled" or sched.looks_like_proxy_error(error)
@@ -255,7 +254,16 @@ def execute_post(self, post_id: int):
                     _p = s.get(Proxy, proxy_id)
                     if _p is not None:
                         sched.record_proxy_check(s, _p, False, error=error)
-            log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {error}")
+            # Trial configure failures surface as generic 500s (no "trial" in
+            # the text, so the pre-publish fallback can't catch them) — and a
+            # blind auto-retry as regular could double-post. Point the admin
+            # at the safe manual retry instead.
+            fail_note = (
+                error + " [trial reel was ON — regular reels may still work; retry with trial off]"
+                if want_trial else error
+            )
+            set_status(PostStatus.failed, fail_reason=fail_note[:2000], retry_count=retries + 1)
+            log_event_sync("ERROR", "post", f"Post {post_id} to @{username} failed: {fail_note}")
             return {"post_id": post_id, "status": "failed", "error": error}
 
         set_status(
