@@ -248,6 +248,11 @@ export default function ProxiesPage() {
       </Card>
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : proxies.length === 0 ? <EmptyState title="No proxies" hint="Assign one proxy per IG account for best deliverability." /> : (
         <Card>
+          <div className="mb-1 flex items-center gap-2">
+            <CardTitle>Proxies ({proxies.length})</CardTitle>
+            <span className="ml-auto text-[11px] text-zinc-400">scroll inside ↓</span>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto pr-1">
           {proxies.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
               <span className={`h-2 w-2 shrink-0 rounded-full ${p.is_healthy ? "bg-emerald-500" : "bg-red-500"}`} />
@@ -261,6 +266,7 @@ export default function ProxiesPage() {
               </span>
             </div>
           ))}
+          </div>
           {test.data && <p className="mt-2 text-xs text-zinc-500">Last test: {JSON.stringify(test.data)}</p>}
         </Card>
       )}
