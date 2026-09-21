@@ -8,22 +8,29 @@ async function get<T = any>(url: string): Promise<T> {
   return data;
 }
 
-/** Show the API's own result payload as a toast so every action gives visible feedback. */
-function announce(data: unknown) {
-  if (!data || typeof data !== "object") return;
+/** Show the API's own result payload as a toast so every action gives visible feedback.
+ *  Returns true when it toasted, so callers can supply a fallback message. */
+function announce(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
   const d = data as Record<string, unknown>;
   if (d.ok === false) {
     toast("error", String(d.detail ?? d.error ?? "Operation failed"));
+    return true;
   } else if (d.ok === true && "detail" in d) {
     toast("success", String(d.detail));
+    return true;
   } else if ("valid" in d) {
     const msg = typeof d.detail === "string" && d.detail ? d.detail : null;
     toast(d.valid ? "success" : "error", msg ?? (d.valid ? "Session is valid" : "Session invalid or expired"));
+    return true;
   } else if (d.queued === true) {
     toast("info", "Processing started — the status badge updates here automatically");
+    return true;
   } else if (typeof d.error === "string") {
     toast("error", d.error);
+    return true;
   }
+  return false;
 }
 
 function errorMessage(err: unknown): string {
@@ -98,7 +105,7 @@ export function useLogs() {
 export function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => get("/settings") });
 }
-export function useApiMutation(method: "post" | "put" | "delete", invalidate: string[][] = []) {
+export function useApiMutation(method: "post" | "put" | "delete", invalidate: string[][] = [], successMsg?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ url, body }: { url: string; body?: unknown }) => {
@@ -107,7 +114,9 @@ export function useApiMutation(method: "post" | "put" | "delete", invalidate: st
       return data;
     },
     onSuccess: (data) => {
-      announce(data);
+      // API-shaped payloads announce themselves; otherwise fall back to the
+      // caller-supplied message so no successful action stays silent.
+      if (!announce(data) && successMsg) toast("success", successMsg);
       for (const key of invalidate) qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ["overview"] });
     },

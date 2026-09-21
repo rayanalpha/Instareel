@@ -15,6 +15,7 @@ export default function UploadPage() {
   const [isTrial, setIsTrial] = useState(false);
   const [watermark, setWatermark] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [drag, setDrag] = useState(false);
   const router = useRouter();
@@ -34,6 +35,7 @@ export default function UploadPage() {
   async function upload() {
     if (!file) return;
     setBusy(true);
+    setProgress(0);
     setError("");
     try {
       const form = new FormData();
@@ -41,6 +43,9 @@ export default function UploadPage() {
       const { data } = await api.post(`/videos/upload`, form, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 600000,
+        onUploadProgress: (e) => {
+          if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
+        },
       });
       // Persist the preview choices as the video's processing settings.
       try {
@@ -119,7 +124,7 @@ export default function UploadPage() {
           </div>
           {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
           <button className="btn-primary mt-4 w-full" disabled={!file || busy} onClick={upload}>
-            {busy ? "Uploading…" : "Upload & process"}
+            {busy ? `Uploading… ${progress}%` : "Upload & process"}
           </button>
           <p className="mt-2 text-xs text-zinc-500">MP4/MOV/MKV/WebM/AVI up to the MAX_UPLOAD_MB limit. Duplicate files are rejected by content hash.</p>
         </Card>

@@ -118,7 +118,7 @@ export default function AccountDetailPage() {
             <button
               className="btn-ghost flex-1"
               disabled={action.isPending}
-              onClick={() => action.mutate({ url: `/accounts/${id}/test-session` })}
+              onClick={() => action.mutate({ url: `/accounts/${id}/test-session` }, { onSuccess: load })}
             >
               {action.isPending ? "Working…" : "Test session"}
             </button>

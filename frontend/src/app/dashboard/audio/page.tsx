@@ -4,14 +4,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useAudioStats, useAudios } from "@/hooks/use-api";
 import { api } from "@/lib/api";
+import { toast } from "@/components/toast";
 import type { AudioStats, AudioTrack } from "@/types/models";
 
 export default function AudioPage() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useAudios();
   const { data: stats } = useAudioStats();
-  const remove = useApiMutation("delete", [["audio"], ["audio-stats"]]);
-  const toggle = useApiMutation("put", [["audio"], ["audio-stats"]]);
+  const remove = useApiMutation("delete", [["audio"], ["audio-stats"]], "Track deleted");
+  const toggle = useApiMutation("put", [["audio"], ["audio-stats"]], "Track updated");
   const [form, setForm] = useState({ name: "", description: "", music_volume: "0.4", duck_original: false });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,7 @@ export default function AudioPage() {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 180000,
       });
+      toast("success", "Track uploaded");
       setFile(null);
       setForm({ name: "", description: "", music_volume: "0.4", duck_original: false });
       qc.invalidateQueries({ queryKey: ["audio"] });
@@ -89,11 +91,12 @@ export default function AudioPage() {
                 <div className="mt-2 flex gap-2">
                   <button
                     className="btn-ghost !py-1 text-xs"
+                    disabled={toggle.isPending}
                     onClick={() => toggle.mutate({ url: `/audio/${t.id}`, body: { name: t.name, description: t.description, music_volume: t.music_volume, duck_original: t.duck_original, is_active: !t.is_active } })}
                   >
-                    {t.is_active ? "Disable" : "Enable"}
+                    {toggle.isPending ? "Saving…" : t.is_active ? "Disable" : "Enable"}
                   </button>
-                  <button className="btn-ghost mt-0 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete "${t.name}"?`)) remove.mutate({ url: `/audio/${t.id}` }); }}>Delete</button>
+                  <button className="btn-ghost mt-0 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete "${t.name}"?`)) remove.mutate({ url: `/audio/${t.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
                 </div>
               </Card>
             );

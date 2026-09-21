@@ -12,7 +12,7 @@ const COLORS: Record<string, string> = {
 
 export default function LogsPage() {
   const { data, isLoading, isError, refetch } = useLogs();
-  const clear = useApiMutation("delete", [["logs"]]);
+  const clear = useApiMutation("delete", [["logs"]], "Logs pruned");
   const [level, setLevel] = useState("");
   const [category, setCategory] = useState("");
   const logs = ((data ?? []) as LogEntry[]).filter(
@@ -31,7 +31,7 @@ export default function LogsPage() {
           <option value="">All categories</option>
           {["auth", "video", "post", "account", "scheduler", "system"].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <button className="btn-ghost !py-2 text-xs" onClick={() => { if (confirm("Delete logs older than 30 days?")) clear.mutate({ url: "/logs?older_than_days=30" }); }}>Prune 30d+</button>
+        <button className="btn-ghost !py-2 text-xs" disabled={clear.isPending} onClick={() => { if (confirm("Delete logs older than 30 days?")) clear.mutate({ url: "/logs?older_than_days=30" }); }}>{clear.isPending ? "Pruning…" : "Prune 30d+"}</button>
       </div>
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : logs.length === 0 ? <EmptyState title="No logs" /> : (
         <Card className="!p-2 font-mono text-xs">

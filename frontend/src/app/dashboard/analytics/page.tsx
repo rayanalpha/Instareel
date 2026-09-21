@@ -9,10 +9,13 @@ import { fmt } from "@/lib/utils";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
+  const [exporting, setExporting] = useState(false);
   const { data, isLoading, isError, refetch } = useOverview(days);
   const { data: accounts } = useAccounts();
 
   async function exportCsv() {
+    if (exporting) return;
+    setExporting(true);
     let url = "";
     try {
       const { data: csv } = await api.get(`/analytics/export`);
@@ -22,10 +25,12 @@ export default function AnalyticsPage() {
       a.href = url;
       a.download = "analytics.csv";
       a.click();
+      toast("success", "CSV downloaded");
     } catch {
       toast("error", "CSV export failed");
     } finally {
       if (url) URL.revokeObjectURL(url);
+      setExporting(false);
     }
   }
 
@@ -39,7 +44,7 @@ export default function AnalyticsPage() {
         <select className="input ml-auto !w-auto" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           {[7, 14, 30, 90].map((d) => <option key={d} value={d}>Last {d} days</option>)}
         </select>
-        <button className="btn-ghost !py-2 text-xs sm:text-sm" onClick={exportCsv}>Export CSV</button>
+        <button className="btn-ghost !py-2 text-xs sm:text-sm" disabled={exporting} onClick={exportCsv}>{exporting ? "Exporting…" : "Export CSV"}</button>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
         <Card><p className="text-2xl font-extrabold">{fmt(data.total_posts)}</p><p className="text-xs text-zinc-500">Posts</p></Card>

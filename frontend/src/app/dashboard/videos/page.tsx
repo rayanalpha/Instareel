@@ -12,6 +12,8 @@ export default function VideosPage() {
   const { data, isLoading, isError, refetch } = useVideos(status);
   const del = useApiMutation("delete", [[ "videos" ]]);
   const process = useApiMutation("post", [["videos"]]);
+  const [procBusyId, setProcBusyId] = useState<number | null>(null);
+  const [delBusyId, setDelBusyId] = useState<number | null>(null);
   const videos = (data ?? []) as Video[];
 
   return (
@@ -53,18 +55,18 @@ export default function VideosPage() {
                 {(v.status === "uploaded" || v.status === "failed") && (
                   <button
                     className="btn-primary flex-1 !py-1.5 text-xs"
-                    disabled={process.isPending}
-                    onClick={() => process.mutate({ url: `/videos/${v.id}/process` })}
+                    disabled={procBusyId === v.id}
+                    onClick={async () => { setProcBusyId(v.id); try { await process.mutateAsync({ url: `/videos/${v.id}/process` }); } finally { setProcBusyId(null); } }}
                   >
-                    Process
+                    {procBusyId === v.id ? "Processing…" : "Process"}
                   </button>
                 )}
                 <button
                   className="btn-ghost !py-1.5 text-xs text-red-500"
-                  disabled={del.isPending}
-                  onClick={() => { if (confirm(`Delete video #${v.id}?`)) del.mutate({ url: `/videos/${v.id}` }); }}
+                  disabled={delBusyId === v.id}
+                  onClick={async () => { if (!confirm(`Delete video #${v.id}?`)) return; setDelBusyId(v.id); try { await del.mutateAsync({ url: `/videos/${v.id}` }); } finally { setDelBusyId(null); } }}
                 >
-                  Delete
+                  {delBusyId === v.id ? "Deleting…" : "Delete"}
                 </button>
               </div>
             </Card>

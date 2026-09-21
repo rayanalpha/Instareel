@@ -10,21 +10,23 @@ export default function ProxiesPage() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useProxies();
   const { data: sourceRows } = useProxySources();
-  const create = useApiMutation("post", [["proxies"]]);
+  const create = useApiMutation("post", [["proxies"]], "Proxy added");
   const remove = useApiMutation("delete", [["proxies"]]);
   const test = useApiMutation("post", [["proxies"]]);
   const checkAll = useApiMutation("post", [["proxies"]]);
   const refreshPool = useApiMutation("post", [["proxies"], ["proxy-sources"]]);
   const purgePool = useApiMutation("post", [["proxies"]]);
-  const createSource = useApiMutation("post", [["proxy-sources"]]);
-  const toggleSource = useApiMutation("put", [["proxy-sources"]]);
-  const removeSource = useApiMutation("delete", [["proxy-sources"]]);
+  const createSource = useApiMutation("post", [["proxy-sources"]], "Source added");
+  const toggleSource = useApiMutation("put", [["proxy-sources"]], "Source updated");
+  const removeSource = useApiMutation("delete", [["proxy-sources"]], "Source deleted");
   const [srcForm, setSrcForm] = useState({ name: "", url: "", default_protocol: "http", default_country: "" });
   const [form, setForm] = useState({ url: "", protocol: "http", username: "", password: "", country: "" });
   const [impFile, setImpFile] = useState<File | null>(null);
   const [impProto, setImpProto] = useState("http");
   const [impCountry, setImpCountry] = useState("");
   const [impBusy, setImpBusy] = useState(false);
+  const [testBusyId, setTestBusyId] = useState<number | null>(null);
+  const [delBusyId, setDelBusyId] = useState<number | null>(null);
   const [impResult, setImpResult] = useState<ProxyImportResult | null>(null);
   const [impError, setImpError] = useState("");
   const proxies = (data ?? []) as Proxy[];
@@ -58,9 +60,9 @@ export default function ProxiesPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-extrabold tracking-tight">Proxy pool</h1>
-        <button className="btn-ghost ml-auto !py-1.5 text-xs" onClick={() => checkAll.mutate({ url: "/proxies/check-all" })}>Health-check all</button>
-        <button className="btn-ghost !py-1.5 text-xs" onClick={() => refreshPool.mutate({ url: "/proxies/pool/refresh" })}>Refresh auto-pool</button>
-        <button className="btn-ghost !py-1.5 text-xs" onClick={() => { if (confirm("Delete long-dead auto-fetched proxies? Manual ones are never touched.")) purgePool.mutate({ url: "/proxies/pool/purge" }); }}>Purge stale</button>
+        <button className="btn-ghost ml-auto !py-1.5 text-xs" disabled={checkAll.isPending} onClick={() => checkAll.mutate({ url: "/proxies/check-all" })}>{checkAll.isPending ? "Checking…" : "Health-check all"}</button>
+        <button className="btn-ghost !py-1.5 text-xs" disabled={refreshPool.isPending} onClick={() => refreshPool.mutate({ url: "/proxies/pool/refresh" })}>{refreshPool.isPending ? "Refreshing…" : "Refresh auto-pool"}</button>
+        <button className="btn-ghost !py-1.5 text-xs" disabled={purgePool.isPending} onClick={() => { if (confirm("Delete long-dead auto-fetched proxies? Manual ones are never touched.")) purgePool.mutate({ url: "/proxies/pool/purge" }); }}>{purgePool.isPending ? "Purging…" : "Purge stale"}</button>
       </div>
       {(() => {
         const auto = proxies.filter((p) => p.source && p.source !== "manual");
@@ -85,7 +87,7 @@ export default function ProxiesPage() {
           </Field>
           <Field label="Username"><input className="input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></Field>
           <Field label="Password"><input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-          <div className="flex items-end"><button className="btn-primary w-full" disabled={!form.url} onClick={() => { create.mutate({ url: "/proxies", body: { ...form, username: form.username || null, password: form.password || null, country: form.country || null } }); setForm({ url: "", protocol: "http", username: "", password: "", country: "" }); }}>Add</button></div>
+          <div className="flex items-end"><button className="btn-primary w-full" disabled={!form.url || create.isPending} onClick={() => { create.mutate({ url: "/proxies", body: { ...form, username: form.username || null, password: form.password || null, country: form.country || null } }); setForm({ url: "", protocol: "http", username: "", password: "", country: "" }); }}>{create.isPending ? "Adding…" : "Add"}</button></div>
         </div>
       </Card>
       <Card>
@@ -133,7 +135,7 @@ export default function ProxiesPage() {
             </select>
           </Field>
           <Field label="Default country"><input className="input" value={srcForm.default_country} onChange={(e) => setSrcForm({ ...srcForm, default_country: e.target.value })} placeholder="DE" maxLength={2} /></Field>
-          <div className="flex items-end"><button className="btn-primary w-full" disabled={!srcForm.name || !srcForm.url} onClick={() => { createSource.mutate({ url: "/proxies/sources", body: srcForm }); setSrcForm({ name: "", url: "", default_protocol: "http", default_country: "" }); }}>Add source</button></div>
+          <div className="flex items-end"><button className="btn-primary w-full" disabled={!srcForm.name || !srcForm.url || createSource.isPending} onClick={() => { createSource.mutate({ url: "/proxies/sources", body: srcForm }); setSrcForm({ name: "", url: "", default_protocol: "http", default_country: "" }); }}>{createSource.isPending ? "Adding…" : "Add source"}</button></div>
         </div>
         <div className="mt-2 space-y-1">
           {((sourceRows ?? []) as ProxySource[]).map((s) => (
@@ -143,10 +145,10 @@ export default function ProxiesPage() {
               <span className="truncate text-xs text-zinc-500">{s.url} · {s.default_protocol}{s.default_country ? ` · ${s.default_country}` : ""}</span>
               <span className="text-xs text-zinc-500">last fetch: +{s.last_added}/{s.last_total}</span>
               <span className="ml-auto flex gap-2">
-                <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => toggleSource.mutate({ url: `/proxies/sources/${s.id}`, body: { name: s.name, url: s.url, default_protocol: s.default_protocol, default_country: s.default_country, is_active: !s.is_active } })}>
+                <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggleSource.isPending} onClick={() => toggleSource.mutate({ url: `/proxies/sources/${s.id}`, body: { name: s.name, url: s.url, default_protocol: s.default_protocol, default_country: s.default_country, is_active: !s.is_active } })}>
                   {s.is_active ? "Disable" : "Enable"}
                 </button>
-                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete source "${s.name}"? (Its proxies stay.)`)) removeSource.mutate({ url: `/proxies/sources/${s.id}` }); }}>Delete</button>
+                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={removeSource.isPending} onClick={() => { if (confirm(`Delete source "${s.name}"? (Its proxies stay.)`)) removeSource.mutate({ url: `/proxies/sources/${s.id}` }); }}>{removeSource.isPending ? "Deleting…" : "Delete"}</button>
               </span>
             </div>
           ))}
@@ -162,8 +164,8 @@ export default function ProxiesPage() {
               {!p.is_active && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600 dark:bg-red-900/40">disabled</span>}
               {p.last_error && <span className="max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
               <span className="ml-auto flex gap-2">
-                <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => test.mutate({ url: `/proxies/${p.id}/test` })}>Test</button>
-                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" onClick={() => { if (confirm("Delete proxy?")) remove.mutate({ url: `/proxies/${p.id}` }); }}>Delete</button>
+                <button className="btn-ghost !px-3 !py-1 text-xs" disabled={testBusyId === p.id} onClick={async () => { setTestBusyId(p.id); try { await test.mutateAsync({ url: `/proxies/${p.id}/test` }); } finally { setTestBusyId(null); } }}>{testBusyId === p.id ? "Testing…" : "Test"}</button>
+                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={delBusyId === p.id} onClick={async () => { if (!confirm("Delete proxy?")) return; setDelBusyId(p.id); try { await remove.mutateAsync({ url: `/proxies/${p.id}` }); } finally { setDelBusyId(null); } }}>{delBusyId === p.id ? "Deleting…" : "Delete"}</button>
               </span>
             </div>
           ))}

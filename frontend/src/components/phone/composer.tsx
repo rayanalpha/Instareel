@@ -13,12 +13,14 @@ export function PhoneComposer({ account, effects, audios }: { account: Account; 
   const [audio, setAudio] = useState("");
   const [isTrial, setIsTrial] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState("");
   const [done, setDone] = useState("");
   const [error, setError] = useState("");
 
   async function publish() {
     if (!file || busy) return;
     setBusy(true);
+    setStep("Uploading video…");
     setError("");
     setDone("");
     try {
@@ -28,11 +30,13 @@ export function PhoneComposer({ account, effects, audios }: { account: Account; 
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 600000,
       });
+      setStep("Saving settings…");
       await api.put(`/videos/${video.id}/settings`, {
         effect_preset: effect || null,
         audio_track: audio || null,
         is_trial: isTrial,
       });
+      setStep("Scheduling post…");
       await api.post("/posts/schedule", {
         video_id: video.id,
         account_id: account.id,
@@ -52,6 +56,7 @@ export function PhoneComposer({ account, effects, audios }: { account: Account; 
       setError(String(msg));
     } finally {
       setBusy(false);
+      setStep("");
     }
   }
 
@@ -85,7 +90,7 @@ export function PhoneComposer({ account, effects, audios }: { account: Account; 
       {error && <p className="text-xs text-red-500">{error}</p>}
       {done && <p className="text-xs text-emerald-600">{done}</p>}
       <button className="btn-primary w-full" disabled={!file || busy} onClick={publish}>
-        {busy ? "Publishing…" : "Share"}
+        {busy ? step || "Publishing…" : "Share"}
       </button>
       <p className="text-[11px] text-zinc-500">Uploads, processes, and queues the post — the scheduler fires it at the next due slot.</p>
     </div>

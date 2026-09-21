@@ -8,10 +8,10 @@ export default function CaptionsPage() {
   const [tab, setTab] = useState<"captions" | "hashtags">("captions");
   const { data: caps, isLoading: l1, isError: e1, refetch: r1 } = useCaptions();
   const { data: tags, isLoading: l2, isError: e2, refetch: r2 } = useHashtags();
-  const createCap = useApiMutation("post", [["captions"]]);
-  const delCap = useApiMutation("delete", [["captions"]]);
-  const createTag = useApiMutation("post", [["hashtags"]]);
-  const delTag = useApiMutation("delete", [["hashtags"]]);
+  const createCap = useApiMutation("post", [["captions"]], "Caption added");
+  const delCap = useApiMutation("delete", [["captions"]], "Caption deleted");
+  const createTag = useApiMutation("post", [["hashtags"]], "Hashtag set added");
+  const delTag = useApiMutation("delete", [["hashtags"]], "Hashtag set deleted");
   const [cap, setCap] = useState({ name: "", content: "", category: "" });
   const [tag, setTag] = useState({ name: "", tags: "" });
 
@@ -33,7 +33,7 @@ export default function CaptionsPage() {
             <div className="grid gap-3 md:grid-cols-3">
               <Field label="Name"><input className="input" value={cap.name} onChange={(e) => setCap({ ...cap, name: e.target.value })} /></Field>
               <Field label="Category"><input className="input" value={cap.category} onChange={(e) => setCap({ ...cap, category: e.target.value })} placeholder="optional" /></Field>
-              <div className="flex items-end"><button className="btn-primary w-full" disabled={!cap.name || !cap.content} onClick={() => { createCap.mutate({ url: "/captions", body: { ...cap, category: cap.category || null } }); setCap({ name: "", content: "", category: "" }); }}>Add</button></div>
+              <div className="flex items-end"><button className="btn-primary w-full" disabled={!cap.name || !cap.content || createCap.isPending} onClick={() => { createCap.mutate({ url: "/captions", body: { ...cap, category: cap.category || null } }); setCap({ name: "", content: "", category: "" }); }}>{createCap.isPending ? "Adding…" : "Add"}</button></div>
             </div>
             <div className="mt-3"><Field label="Content (emoji + line breaks supported)"><textarea className="input" rows={3} value={cap.content} onChange={(e) => setCap({ ...cap, content: e.target.value })} /></Field></div>
           </Card>
@@ -51,7 +51,7 @@ export default function CaptionsPage() {
                     <p className="font-semibold text-zinc-700 dark:text-zinc-300">Instagram preview</p>
                     <p className="whitespace-pre-wrap"><strong>yourpage</strong> {c.content.slice(0, 140)}{c.content.length > 140 ? "…" : ""}</p>
                   </div>
-                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete "${c.name}"?`)) delCap.mutate({ url: `/captions/${c.id}` }); }}>Delete</button>
+                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" disabled={delCap.isPending} onClick={() => { if (confirm(`Delete "${c.name}"?`)) delCap.mutate({ url: `/captions/${c.id}` }); }}>{delCap.isPending ? "Deleting…" : "Delete"}</button>
                 </Card>
               ))}
             </div>
@@ -66,7 +66,7 @@ export default function CaptionsPage() {
               <Field label="Tags (comma separated)">
                 <input className="input" value={tag.tags} onChange={(e) => setTag({ ...tag, tags: e.target.value })} placeholder="#reels, #viral, …" />
               </Field>
-              <div className="flex items-end"><button className="btn-primary w-full" disabled={!tag.name || !tag.tags} onClick={() => { createTag.mutate({ url: "/hashtags", body: tag }); setTag({ name: "", tags: "" }); }}>Add</button></div>
+              <div className="flex items-end"><button className="btn-primary w-full" disabled={!tag.name || !tag.tags || createTag.isPending} onClick={() => { createTag.mutate({ url: "/hashtags", body: tag }); setTag({ name: "", tags: "" }); }}>{createTag.isPending ? "Adding…" : "Add"}</button></div>
             </div>
           </Card>
           {l2 ? <Spinner /> : e2 ? <QueryFailed onRetry={() => r2()} /> : ((tags ?? []) as HashtagSet[]).length === 0 ? <EmptyState title="No hashtag sets" /> : (
@@ -75,7 +75,7 @@ export default function CaptionsPage() {
                 <Card key={h.id}>
                   <div className="flex items-center gap-2"><strong>{h.name}</strong><span className="ml-auto text-xs text-zinc-500">used {h.use_count}×</span></div>
                   <p className="mt-2 text-sm text-sky-600 dark:text-sky-400">{h.tags}</p>
-                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete "${h.name}"?`)) delTag.mutate({ url: `/hashtags/${h.id}` }); }}>Delete</button>
+                  <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" disabled={delTag.isPending} onClick={() => { if (confirm(`Delete "${h.name}"?`)) delTag.mutate({ url: `/hashtags/${h.id}` }); }}>{delTag.isPending ? "Deleting…" : "Delete"}</button>
                 </Card>
               ))}
             </div>

@@ -10,7 +10,8 @@ export default function PostsPage() {
   const { data, isLoading, isError, refetch } = usePosts(status);
   const { data: queue } = useQueue();
   const retry = useApiMutation("post", [["posts"]]);
-  const remove = useApiMutation("delete", [["posts"]]);
+  const remove = useApiMutation("delete", [["posts"]], "Post deleted");
+  const [busyId, setBusyId] = useState<number | null>(null);
   const posts = (data ?? []) as Post[];
 
   return (
@@ -59,8 +60,8 @@ export default function PostsPage() {
                     <td className="py-2 pr-4 text-right">{p.engagement_rate != null ? `${p.engagement_rate}%` : "—"}</td>
                     <td className="py-2 pr-4">{p.ig_permalink ? <a className="text-emerald-500 hover:underline" href={p.ig_permalink} target="_blank">Reel ↗</a> : "—"}</td>
                     <td className="py-2 text-right">
-                      {p.status === "failed" && <button className="btn-ghost mr-2 !px-3 !py-1 text-xs" onClick={() => retry.mutate({ url: `/posts/${p.id}/retry` })}>Retry</button>}
-                      <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete post #${p.id}?`)) remove.mutate({ url: `/posts/${p.id}` }); }}>Delete</button>
+                      {p.status === "failed" && <button className="btn-ghost mr-2 !px-3 !py-1 text-xs" disabled={busyId === p.id} onClick={async () => { setBusyId(p.id); try { await retry.mutateAsync({ url: `/posts/${p.id}/retry` }); } finally { setBusyId(null); } }}>{busyId === p.id ? "Retrying…" : "Retry"}</button>}
+                      <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={busyId === p.id} onClick={async () => { if (!confirm(`Delete post #${p.id}?`)) return; setBusyId(p.id); try { await remove.mutateAsync({ url: `/posts/${p.id}` }); } finally { setBusyId(null); } }}>{busyId === p.id ? "Deleting…" : "Delete"}</button>
                     </td>
                   </tr>
                 ))}

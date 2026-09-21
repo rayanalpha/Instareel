@@ -12,9 +12,9 @@ export default function SchedulePage() {
   const { data: accounts } = useAccounts();
   const { data: captions } = useCaptions();
   const { data: effects } = useEffects();
-  const create = useApiMutation("post", [["rules"]]);
-  const remove = useApiMutation("delete", [["rules"]]);
-  const toggle = useApiMutation("post", [["rules"]]);
+  const create = useApiMutation("post", [["rules"]], "Rule added");
+  const remove = useApiMutation("delete", [["rules"]], "Rule deleted");
+  const toggle = useApiMutation("post", [["rules"]], "Rule updated");
   const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "" });
   const list = (rules ?? []) as ScheduleRule[];
 
@@ -92,7 +92,7 @@ export default function SchedulePage() {
               {((captions ?? []) as Caption[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
-          <div className="flex items-end"><button className="btn-primary w-full" onClick={submit} disabled={create.isPending}>Add rule</button></div>
+          <div className="flex items-end"><button className="btn-primary w-full" onClick={submit} disabled={create.isPending}>{create.isPending ? "Adding…" : "Add rule"}</button></div>
         </div>
       </Card>
 
@@ -106,8 +106,8 @@ export default function SchedulePage() {
                 {r.is_active ? "active" : "paused"}
               </span>
               <span className="ml-auto flex gap-2">
-                <button className="btn-ghost !px-3 !py-1 text-xs" onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>Toggle</button>
-                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>Delete</button>
+                <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggle.isPending} onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>{toggle.isPending ? "Saving…" : "Toggle"}</button>
+                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
               </span>
             </div>
           ))}

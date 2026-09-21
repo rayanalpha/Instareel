@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, EmptyState, Field, QueryFailed, Spinner, StatusBadge } from "@/components/ui";
@@ -10,9 +11,10 @@ import type { Account, Proxy } from "@/types/models";
 
 export default function AccountsPage() {
   const { data, isLoading, isError, refetch } = useAccounts();
+  const qc = useQueryClient();
   const { data: proxies } = useProxies();
-  const create = useApiMutation("post", [["accounts"]]);
-  const remove = useApiMutation("delete", [["accounts"]]);
+  const create = useApiMutation("post", [["accounts"]], "Account added");
+  const remove = useApiMutation("delete", [["accounts"]], "Account removed");
   const action = useApiMutation("post", [["accounts"]]);
   const update = useApiMutation("put", [["accounts"]]);
   const [form, setForm] = useState({ username: "", password: "", max_daily_posts: 3 });
@@ -37,6 +39,7 @@ export default function AccountsPage() {
         timeout: 60000,
       });
       toast("success", String(res.detail ?? "Session uploaded"));
+      qc.invalidateQueries({ queryKey: ["accounts"] });
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Session upload failed";
       toast("error", String(msg));
@@ -70,7 +73,7 @@ export default function AccountsPage() {
               className="btn-primary w-full" disabled={!form.username || !form.password || create.isPending}
               onClick={() => { create.mutate({ url: "/accounts", body: form }); setForm({ username: "", password: "", max_daily_posts: 3 }); }}
             >
-              Add account
+              {create.isPending ? "Adding…" : "Add account"}
             </button>
           </div>
         </div>
@@ -143,7 +146,7 @@ export default function AccountsPage() {
                   disabled={remove.isPending}
                   onClick={() => { if (confirm(`Remove @${a.username}?`)) remove.mutate({ url: `/accounts/${a.id}` }); }}
                 >
-                  Remove
+                  {remove.isPending ? "Removing…" : "Remove"}
                 </button>
               </div>
             </Card>

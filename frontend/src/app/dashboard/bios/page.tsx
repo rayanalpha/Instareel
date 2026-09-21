@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { useAccounts, useApiMutation, useBios } from "@/hooks/use-api";
 import { api } from "@/lib/api";
+import { toast } from "@/components/toast";
 import { timeAgo } from "@/lib/utils";
 import type { Account, Bio, IgProfile } from "@/types/models";
 
@@ -13,12 +14,13 @@ export default function BiosPage() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useBios();
   const { data: accounts } = useAccounts();
-  const create = useApiMutation("post", [["bios"]]);
-  const remove = useApiMutation("delete", [["bios"]]);
-  const apply = useApiMutation("post", [["bios"]]);
+  const create = useApiMutation("post", [["bios"]], "Profile config added");
+  const remove = useApiMutation("delete", [["bios"]], "Profile config deleted");
+  const apply = useApiMutation("post", [["bios"]], "Bio applied — check Instagram");
   const [form, setForm] = useState({ account_id: "", text: "", link_url: "", full_name: "", privacy: "" as Privacy, rotation_interval_days: 14 });
   const [current, setCurrent] = useState<Record<number, IgProfile | null>>({});
   const [loadingCurrent, setLoadingCurrent] = useState<number | null>(null);
+  const [picBusy, setPicBusy] = useState<number | null>(null);
   const [picError, setPicError] = useState("");
   const bios = (data ?? []) as Bio[];
 
@@ -41,6 +43,7 @@ export default function BiosPage() {
   async function uploadPicture(id: number, file: File | null) {
     if (!file) return;
     setPicError("");
+    setPicBusy(id);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -48,10 +51,13 @@ export default function BiosPage() {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 120000,
       });
+      toast("success", "Profile picture uploaded");
       qc.invalidateQueries({ queryKey: ["bios"] });
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Picture upload failed";
       setPicError(String(msg));
+    } finally {
+      setPicBusy(null);
     }
   }
 
@@ -85,7 +91,7 @@ export default function BiosPage() {
           <Field label="Bio text"><textarea className="input" rows={2} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /></Field>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <Field label="Rotate every (days)"><input className="input" type="number" min={1} max={365} value={form.rotation_interval_days} onChange={(e) => setForm({ ...form, rotation_interval_days: Number(e.target.value) })} /></Field>
-            <button className="btn-primary" disabled={!form.account_id || !form.text} onClick={() => { create.mutate({ url: "/bios", body: { account_id: Number(form.account_id), text: form.text, link_url: form.link_url, full_name: form.full_name, make_private: privacyBody(form.privacy), rotation_interval_days: form.rotation_interval_days } }); setForm({ account_id: "", text: "", link_url: "", full_name: "", privacy: "", rotation_interval_days: 14 }); }}>Add</button>
+            <button className="btn-primary" disabled={!form.account_id || !form.text || create.isPending} onClick={() => { create.mutate({ url: "/bios", body: { account_id: Number(form.account_id), text: form.text, link_url: form.link_url, full_name: form.full_name, make_private: privacyBody(form.privacy), rotation_interval_days: form.rotation_interval_days } }); setForm({ account_id: "", text: "", link_url: "", full_name: "", privacy: "", rotation_interval_days: 14 }); }}>{create.isPending ? "Adding…" : "Add"}</button>
           </div>
         </div>
       </Card>
@@ -117,15 +123,15 @@ export default function BiosPage() {
                 <p className="mt-2 text-xs text-red-500">Could not read live profile (session/proxy issue).</p>
               ) : null}
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button className="btn-primary !py-1.5 text-xs" onClick={() => apply.mutate({ url: `/bios/${b.id}/apply` })}>Apply now</button>
+                <button className="btn-primary !py-1.5 text-xs" disabled={apply.isPending} onClick={() => apply.mutate({ url: `/bios/${b.id}/apply` })}>{apply.isPending ? "Applying…" : "Apply now"}</button>
                 <button className="btn-ghost !py-1.5 text-xs" disabled={loadingCurrent === b.id} onClick={() => loadCurrent(b.id)}>
                   {loadingCurrent === b.id ? "Reading…" : "Compare live"}
                 </button>
                 <label className="btn-ghost cursor-pointer !py-1.5 text-xs">
-                  {b.has_picture ? "Replace pic" : "Upload pic"}
+                  {picBusy === b.id ? "Uploading…" : b.has_picture ? "Replace pic" : "Upload pic"}
                   <input type="file" className="hidden" accept="image/*" onChange={(e) => uploadPicture(b.id, e.target.files?.[0] ?? null)} />
                 </label>
-                <button className="btn-ghost !py-1.5 text-xs text-red-500" onClick={() => { if (confirm("Delete this profile config?")) remove.mutate({ url: `/bios/${b.id}` }); }}>Delete</button>
+                <button className="btn-ghost !py-1.5 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm("Delete this profile config?")) remove.mutate({ url: `/bios/${b.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
               </div>
             </Card>
           ))}
