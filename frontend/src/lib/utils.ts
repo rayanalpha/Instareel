@@ -12,9 +12,18 @@ export function fmt(n: number | null | undefined): string {
   return String(n);
 }
 
+/** API datetimes come from SQLite: UTC wall time with no offset suffix.
+ *  A naive ISO string parses as browser-local time, shifting every
+ *  timestamp by the viewer's UTC offset (e.g. +3:30 Tehran turns a fresh
+ *  row into "3h ago"). Assume UTC unless a zone is already present. */
+export function parseApiDate(iso: string): Date {
+  const zoned = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+  return new Date(iso.includes("T") && !zoned ? `${iso}Z` : iso);
+}
+
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "never";
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const s = Math.floor((Date.now() - parseApiDate(iso).getTime()) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;

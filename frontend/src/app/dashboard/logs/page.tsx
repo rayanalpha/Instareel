@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Card, EmptyState, QueryFailed, Spinner } from "@/components/ui";
 import { useApiMutation, useLogs } from "@/hooks/use-api";
+import { parseApiDate } from "@/lib/utils";
 import type { LogEntry } from "@/types/models";
 
 const COLORS: Record<string, string> = {
@@ -36,7 +37,7 @@ export default function LogsPage() {
         <Card className="!p-2 font-mono text-xs">
           {logs.map((l) => (
             <div key={l.id} className="flex flex-wrap gap-x-2 gap-y-1 border-b border-zinc-100 px-2 py-1.5 last:border-0 dark:border-zinc-800">
-              <span className="shrink-0 text-zinc-400">{new Date(l.timestamp).toLocaleString()}</span>
+              <span className="shrink-0 text-zinc-400">{parseApiDate(l.timestamp).toLocaleString()}</span>
               <span className={`shrink-0 font-semibold ${COLORS[l.level] ?? ""}`}>{l.level}</span>
               <span className="shrink-0 rounded bg-zinc-100 px-1 dark:bg-zinc-800">{l.category}</span>
               <span className="w-full break-all sm:w-auto sm:flex-1">{l.message}</span>
