@@ -31,7 +31,8 @@ def _out(v: Video) -> VideoOut:
         custom_filters=v.custom_filters, is_trial=v.is_trial, trial_strategy=v.trial_strategy,
         add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
-        processed_at=v.processed_at, thumbnail_path=v.thumbnail_path, created_at=v.created_at,
+        processed_at=v.processed_at, thumbnail_path=v.thumbnail_path,
+        custom_thumbnail_path=v.custom_thumbnail_path, created_at=v.created_at,
     )
 
 
@@ -176,7 +177,7 @@ async def delete_video(video_id: int, _: str = Depends(get_current_admin), db: A
     n_posts = (await db.execute(select(_func.count(Post.id)).where(Post.video_id == video_id))).scalar() or 0
     if n_posts:
         raise HTTPException(409, f"Video has {n_posts} post(s) — delete them first to preserve history")
-    for path in (v.raw_path, v.processed_path, v.thumbnail_path):
+    for path in (v.raw_path, v.processed_path, v.thumbnail_path, v.custom_thumbnail_path):
         try:
             if path and os.path.exists(path):
                 os.remove(path)
@@ -280,7 +281,89 @@ async def thumbnail(video_id: int, _: str = Depends(get_current_admin), db: Asyn
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
-    return _serve(v.thumbnail_path, "image/jpeg")
+    # Custom cover wins; otherwise the auto-extracted frame.
+    return _serve(v.custom_thumbnail_path or v.thumbnail_path, "image/jpeg")
+
+
+THUMB_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+THUMB_MAX_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/{video_id}/thumbnail", response_model=VideoOut)
+@limiter.limit("20/minute")
+async def upload_thumbnail(
+    request: Request,
+    video_id: int,
+    file: UploadFile = File(...),
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a custom cover for this video. Used at post time instead of the
+    auto-extracted frame. Non-JPEG input is converted via ffmpeg."""
+    import subprocess
+
+    v = await db.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "Video not found")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in THUMB_EXT:
+        raise HTTPException(400, f"Unsupported image type {ext}. Allowed: {sorted(THUMB_EXT)}")
+    raw = await file.read()
+    await file.close()
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    if len(raw) > THUMB_MAX_BYTES:
+        raise HTTPException(413, "Image exceeds 5MB limit")
+    dirs = media_dirs()
+    tmp_in = os.path.join(dirs["thumbnails"], f"upload_{uuid.uuid4().hex}{ext}")
+    dst = os.path.join(dirs["thumbnails"], f"custom_{uuid.uuid4().hex}.jpg")
+    try:
+        with open(tmp_in, "wb") as f:
+            f.write(raw)
+        if ext in (".jpg", ".jpeg"):
+            os.replace(tmp_in, dst)
+        else:
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp_in, "-q:v", "3", dst],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+            )
+            if r.returncode != 0 or not os.path.exists(dst):
+                raise HTTPException(422, "File is not a valid image (ffmpeg conversion failed)")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Thumbnail upload failed: {exc}")
+    finally:
+        if os.path.exists(tmp_in):
+            os.remove(tmp_in)
+    # Replace: drop the previous custom file so covers don't pile up on disk.
+    if v.custom_thumbnail_path and os.path.exists(v.custom_thumbnail_path):
+        try:
+            os.remove(v.custom_thumbnail_path)
+        except OSError:
+            pass
+    v.custom_thumbnail_path = dst
+    await db.commit()
+    await db.refresh(v)
+    await log_event("INFO", "video", f"Custom thumbnail set for video #{video_id}")
+    return _out(v)
+
+
+@router.delete("/{video_id}/thumbnail", response_model=VideoOut)
+async def delete_thumbnail(video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Drop the custom cover — the auto-extracted frame is used again."""
+    v = await db.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "Video not found")
+    if v.custom_thumbnail_path and os.path.exists(v.custom_thumbnail_path):
+        try:
+            os.remove(v.custom_thumbnail_path)
+        except OSError:
+            pass
+    v.custom_thumbnail_path = None
+    await db.commit()
+    await db.refresh(v)
+    return _out(v)
 
 
 # ---- Posts ----

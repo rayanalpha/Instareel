@@ -16,6 +16,8 @@ export default function UploadPage() {
   const [watermark, setWatermark] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [thumb, setThumb] = useState<File | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [drag, setDrag] = useState(false);
   const router = useRouter();
@@ -31,6 +33,16 @@ export default function UploadPage() {
     setObjectUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    if (!thumb) {
+      setThumbUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(thumb);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumb]);
 
   async function upload() {
     if (!file) return;
@@ -60,6 +72,19 @@ export default function UploadPage() {
         );
       } catch {
         /* settings save is best-effort; processing still proceeds */
+      }
+      // Custom cover is best-effort too — the auto frame still works.
+      if (thumb) {
+        try {
+          const tf = new FormData();
+          tf.append("file", thumb);
+          await api.post(`/videos/${data.id}/thumbnail`, tf, {
+            headers: { "Content-Type": "multipart/form-data" },
+            timeout: 120000,
+          });
+        } catch {
+          /* ignore */
+        }
       }
       router.push(`/dashboard/videos/${data.id}`);
     } catch (e: unknown) {
@@ -121,6 +146,19 @@ export default function UploadPage() {
               <input type="checkbox" checked={isTrial} onChange={(e) => setIsTrial(e.target.checked)} />
               Trial reel (non-followers first)
             </label>
+            <Field label="Custom cover (optional — else auto frame at 25%)">
+              <div className="flex items-center gap-2">
+                {thumbUrl && <img src={thumbUrl} alt="cover" className="h-16 w-9 rounded object-cover" />}
+                <label className="btn-ghost cursor-pointer !py-1.5 text-xs">
+                  {thumb ? "Change" : "Choose image"}
+                  <input
+                    type="file" className="hidden" accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => setThumb(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {thumb && <button className="btn-ghost !py-1.5 text-xs text-red-500" onClick={() => setThumb(null)}>Clear</button>}
+              </div>
+            </Field>
           </div>
           {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
           <button className="btn-primary mt-4 w-full" disabled={!file || busy} onClick={upload}>

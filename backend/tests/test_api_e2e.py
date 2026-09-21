@@ -209,6 +209,42 @@ class TestVideos:
         assert c.post("/api/v1/videos/upload", files={"file": ("x.txt", b"hi", "text/plain")}).status_code == 400
         assert c.delete(f"/api/v1/videos/{vid}").status_code == 204
 
+    def test_custom_thumbnail_roundtrip(self, client, tmp_path):
+        import subprocess
+        import tempfile
+
+        c, _, _ = client
+        src = self._mp4(tmp_path)
+        with open(src, "rb") as f:
+            vid = c.post("/api/v1/videos/upload", files={"file": ("v.mp4", f, "video/mp4")}, timeout=120).json()["id"]
+        # Real JPEG cover via ffmpeg.
+        jpg = os.path.join(tempfile.gettempdir(), "e2e_cover.jpg")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=red:size=320x240:duration=1",
+             "-frames:v", "1", jpg], check=True,
+        )
+        with open(jpg, "rb") as f:
+            r = c.post(f"/api/v1/videos/{vid}/thumbnail", files={"file": ("cover.jpg", f, "image/jpeg")})
+        assert r.status_code == 200, r.text
+        assert r.json()["custom_thumbnail_path"]
+        got = c.get(f"/api/v1/videos/{vid}/thumbnail")
+        assert got.status_code == 200 and got.headers["content-type"] == "image/jpeg"
+        # PNG exercises the ffmpeg conversion path.
+        png = os.path.join(tempfile.gettempdir(), "e2e_cover.png")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=blue:size=320x240:duration=1",
+             "-frames:v", "1", png], check=True,
+        )
+        with open(png, "rb") as f:
+            r2 = c.post(f"/api/v1/videos/{vid}/thumbnail", files={"file": ("cover.png", f, "image/png")})
+        assert r2.status_code == 200, r2.text
+        # Bad extension rejected; custom cleared on delete (reverts to auto).
+        assert c.post(f"/api/v1/videos/{vid}/thumbnail", files={"file": ("x.txt", b"hi", "text/plain")}).status_code == 400
+        assert c.delete(f"/api/v1/videos/{vid}/thumbnail").status_code == 200
+        assert c.get(f"/api/v1/videos/{vid}").json()["custom_thumbnail_path"] is None
+        assert c.get(f"/api/v1/videos/{vid}/thumbnail").status_code == 404
+        assert c.delete(f"/api/v1/videos/{vid}").status_code == 204
+
     def test_schedule_guards(self, client):
         c, maker, _ = client
 
@@ -521,8 +557,8 @@ class TestPostingPipeline:
         outer = self
 
         def fake_upload(_self, username, password, video_path, caption,
-                        trial=False, trial_strategy="manual"):
-            outer.calls.append((username, video_path, trial))
+                        trial=False, trial_strategy="manual", thumbnail_path=None):
+            outer.calls.append((username, video_path, trial, thumbnail_path))
             if outer.fail_with is not None:
                 return None, None, outer.fail_with
             return "mid1", "https://www.instagram.com/reel/AAA/", ""

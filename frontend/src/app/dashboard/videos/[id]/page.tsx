@@ -11,6 +11,7 @@ interface Detail {
   effect_preset: string | null; audio_track: string | null; is_trial: boolean;
   trial_strategy: string; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
+  custom_thumbnail_path: string | null;
 }
 
 // Terminal states: nothing left to wait for — stop polling.
@@ -22,6 +23,8 @@ export default function VideoDetailPage() {
   const [progress, setProgress] = useState<{ percentage: number; stage: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [thumbBusy, setThumbBusy] = useState(false);
   const [form, setForm] = useState({ effect_preset: "", audio_track: "", is_trial: false, trial_strategy: "manual", trim_start: "", trim_end: "", add_watermark: true });
   const { data: effects } = useEffects();
   const { data: audios } = useAudios();
@@ -127,6 +130,57 @@ export default function VideoDetailPage() {
     };
   }, [id, video?.status]);
 
+  // Cover thumbnail: same-origin blob fetch (auth header), like the preview.
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setThumbUrl(null);
+    (async () => {
+      try {
+        const res = await api.get(`/videos/${id}/thumbnail`, { responseType: "blob", timeout: 60000 });
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(res.data);
+        setThumbUrl(objectUrl);
+      } catch { /* no thumbnail yet — upload one below */ }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id, video?.custom_thumbnail_path, video?.status]);
+
+  async function uploadThumb(file: File | null) {
+    if (!file) return;
+    setThumbBusy(true);
+    setActionError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      await api.post(`/videos/${id}/thumbnail`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      await load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Cover upload failed";
+      setActionError(String(msg));
+    } finally {
+      setThumbBusy(false);
+    }
+  }
+
+  async function removeThumb() {
+    setThumbBusy(true);
+    setActionError("");
+    try {
+      await api.delete(`/videos/${id}/thumbnail`);
+      await load();
+    } catch {
+      setActionError("Could not remove cover.");
+    } finally {
+      setThumbBusy(false);
+    }
+  }
   // Live status for a Post-now request: poll until a terminal post state.
   useEffect(() => {
     if (!nowPostId) return;
@@ -188,6 +242,38 @@ export default function VideoDetailPage() {
           </div>
         )}
         <p className="mt-2 text-xs text-zinc-500">Preview shows the selected effect (CSS approximation) and watermark overlay live.</p>
+        <div className="mt-3 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+          <div className="flex items-center gap-2">
+            {thumbUrl ? (
+              <img src={thumbUrl} alt="cover" className="h-20 w-11 rounded object-cover" />
+            ) : (
+              <div className="flex h-20 w-11 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400 dark:bg-zinc-800">no cover</div>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold">
+                Cover {video.custom_thumbnail_path
+                  ? <span className="text-emerald-500">· custom</span>
+                  : <span className="text-zinc-400">· auto frame</span>}
+              </p>
+              <p className="text-[11px] text-zinc-500">Posted as the reel cover. Custom wins over the auto frame.</p>
+            </div>
+          </div>
+          <div className="mt-2 flex gap-2">
+            <label className="btn-ghost cursor-pointer !py-1.5 text-xs">
+              {thumbBusy ? "Uploading…" : video.custom_thumbnail_path ? "Replace" : "Upload cover"}
+              <input
+                type="file" className="hidden" accept="image/jpeg,image/png,image/webp"
+                disabled={thumbBusy}
+                onChange={(e) => { uploadThumb(e.target.files?.[0] ?? null); e.target.value = ""; }}
+              />
+            </label>
+            {video.custom_thumbnail_path && (
+              <button className="btn-ghost !py-1.5 text-xs text-red-500" disabled={thumbBusy} onClick={removeThumb}>
+                Revert to auto
+              </button>
+            )}
+          </div>
+        </div>
         {video.status === "processing" && (
           <div className="mt-3">
             <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">

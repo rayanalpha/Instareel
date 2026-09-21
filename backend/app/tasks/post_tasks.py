@@ -219,9 +219,13 @@ def execute_post(self, post_id: int):
 
         svc = InstagramService(proxy_url=proxy_url, session_path=session_path_for(username, settings.MEDIA_ROOT))
         full_caption = (caption + "\n" + tags).strip()
+        from app.services.video_processor import resolve_post_thumbnail_sync
+
+        thumb_path = resolve_post_thumbnail_sync(video_id)
         media_id, permalink, error = svc.upload_reel(
             username, password, video_path, full_caption,
             trial=want_trial, trial_strategy=trial_strategy,
+            thumbnail_path=thumb_path,
         )
 
         if error:

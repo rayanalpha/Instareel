@@ -20,6 +20,7 @@ class VideoOut(BaseModel):
     failed_reason: str | None
     processed_at: dt.datetime | None
     thumbnail_path: str | None
+    custom_thumbnail_path: str | None
     created_at: dt.datetime
 
 

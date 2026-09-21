@@ -53,6 +53,44 @@ def md5_of_file(path: str) -> str:
     return h.hexdigest()
 
 
+def resolve_post_thumbnail_sync(video_id: int) -> str | None:
+    """Cover file for instagrapi (Celery-safe, sync).
+
+    Priority: admin custom cover -> auto-extracted frame -> freshly
+    extracted frame from the processed video. Returns None only when no
+    video file exists to extract from — the caller then uploads without a
+    thumbnail (instagrapi's MoviePy fallback, may fail in this image).
+    """
+    from app.database import SyncSessionLocal
+    from app.models import Video
+
+    with SyncSessionLocal() as s:
+        video = s.get(Video, video_id)
+        if not video:
+            return None
+        for candidate in (video.custom_thumbnail_path, video.thumbnail_path):
+            if candidate and os.path.exists(candidate):
+                return candidate
+        src = video.processed_path or video.raw_path
+        duration = video.duration or 0.0
+    if not src or not os.path.exists(src):
+        return None
+    try:
+        dst = os.path.join(media_dirs()["thumbnails"], f"post_{uuid.uuid4().hex}.jpg")
+        extract_thumbnail_sync(src, duration or 10.0, dst)
+        if os.path.exists(dst):
+            with SyncSessionLocal() as s:
+                video = s.get(Video, video_id)
+                # Don't clobber a custom cover uploaded concurrently.
+                if video and not video.custom_thumbnail_path:
+                    video.thumbnail_path = dst
+                    s.commit()
+            return dst
+    except Exception:
+        log.warning("Thumbnail extraction failed for video %s", video_id, exc_info=True)
+    return None
+
+
 def default_watermark() -> str | None:
     p = os.path.join(media_dirs()["watermarks"], "watermark.png")
     return p if os.path.exists(p) else None

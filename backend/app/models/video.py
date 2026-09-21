@@ -35,6 +35,8 @@ class Video(Base, TimestampMixin):
     raw_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     processed_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Admin-uploaded cover: preferred over the auto-extracted frame at post time.
+    custom_thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
