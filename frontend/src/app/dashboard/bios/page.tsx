@@ -114,6 +114,25 @@ export default function BiosPage() {
     }
   }
 
+  async function removeLivePicture() {
+    if (!bio || !confirm("Delete the CURRENT Instagram profile photo? This is immediate and cannot be undone.")) return;
+    setOpError("");
+    setApplyBusy("remove-live");
+    try {
+      await api.post(`/bios/${bio.id}/picture/remove-live`);
+      toast("success", "Live profile photo removed");
+      const list = (await api.get("/bios")).data as Bio[];
+      const fresh = list.find((x) => x.id === bio.id);
+      if (fresh) setBio(fresh);
+      setCurrent(undefined); // live snapshot is stale now — re-compare to verify
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Live photo removal failed";
+      setOpError(String(msg));
+    } finally {
+      setApplyBusy(null);
+    }
+  }
+
   async function loadCurrent() {
     if (!bio) return;
     setLoadingCurrent(true);
@@ -218,6 +237,9 @@ export default function BiosPage() {
                 )}
                 <button className="btn-primary !py-1.5 text-xs" disabled={!bio.has_picture || busy("picture")} onClick={() => saveAndApply("picture", {})}>
                   {busy("picture") ? "Applying…" : "Apply picture"}
+                </button>
+                <button className="btn-ghost !py-1.5 text-xs !text-red-500" disabled={busy("remove-live")} onClick={removeLivePicture} title="Delete the current Instagram profile photo (one-way)">
+                  {busy("remove-live") ? "Removing…" : "Remove live photo"}
                 </button>
               </div>
             </Card>

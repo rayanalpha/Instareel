@@ -248,6 +248,48 @@ async def delete_bio_picture(bid: int, _: str = Depends(get_current_admin), db: 
     return _bio_out(b)
 
 
+@bio_router.post("/{bid}/picture/remove-live")
+@limiter.limit("10/minute")
+async def remove_live_picture(
+    request: Request, bid: int, _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete the CURRENT Instagram profile photo (not the staged file).
+
+    One-way and immediate — there is no undo on IG's side, hence the
+    confirm on the frontend."""
+    import concurrent.futures
+
+    from app.config import settings
+    from app.services.instagram_service import InstagramService
+    from app.utils.instagram_helpers import session_path_for
+
+    from app.tasks import sync_helpers as sched
+
+    b = await db.get(BioConfig, bid)
+    if not b:
+        raise HTTPException(404, "Bio not found")
+    acc = await db.get(Account, b.account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if not sched.account_reachable(db, acc):
+        raise HTTPException(409, "No healthy proxy route for this account right now")
+    username, password = acc.username, decrypt_secret(acc.password_enc)
+    purl = sched.resolve_proxy_url(db, acc)
+    acc_id = acc.id
+    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        err = pool.submit(svc.remove_live_picture, username, password).result(timeout=180)
+    if err:
+        raise HTTPException(502, f"Live picture removal failed: {err}")
+    b = await db.get(BioConfig, bid)
+    if b:
+        b.last_applied = dt.datetime.now(dt.timezone.utc)
+        await db.commit()
+    await log_event("INFO", "account", f"Live profile picture removed for account {acc_id}", {"bio_id": bid})
+    return {"ok": True}
+
+
 @bio_router.get("/{bid}/current")
 async def bio_current(
     bid: int, _: str = Depends(get_current_admin),

@@ -244,6 +244,35 @@ class InstagramService:
         except Exception as exc:
             return f"{_classify(exc)}: {exc}"
 
+    def remove_live_picture(self, username: str, password: str) -> str:
+        """Delete the CURRENT Instagram profile photo. Returns "" or "kind: error".
+
+        instagrapi has no wrapper for this; the official app calls
+        POST accounts/remove_profile_picture/ (confirmed across the
+        python/js/c# private-API clients), so we sign it the same way.
+        """
+        cl = self._make_client(username)
+        try:
+            ok, _ = _feed_with_retry(cl)
+            if not ok:
+                cl.login(username, password)
+                if self.session_path:
+                    try:
+                        cl.dump_settings(self.session_path)
+                    except Exception:
+                        pass
+            res = cl.private_request("accounts/remove_profile_picture/")
+            if not res or res.get("status") != "ok":
+                return f"generic: unexpected response {res}"
+            if self.session_path:
+                try:
+                    cl.dump_settings(self.session_path)
+                except Exception:
+                    pass
+            return ""
+        except Exception as exc:
+            return f"{_classify(exc)}: {exc}"
+
     def read_profile(self, username: str) -> dict:
         """Read-only IG-side profile snapshot (bio/full name/url/privacy/pic).
 

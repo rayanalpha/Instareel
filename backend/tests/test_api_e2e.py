@@ -352,6 +352,8 @@ class TestResources:
         # Section validation happens before anything touches Instagram.
         assert c.post(f"/api/v1/bios/{b1['id']}/apply", json={"fields": ["nope"]}).status_code == 422
         assert c.post(f"/api/v1/bios/{b1['id']}/apply", json={"fields": ["link"]}).status_code == 422
+        # Live-photo removal resolves the config first (live call needs IG).
+        assert c.post("/api/v1/bios/999/picture/remove-live").status_code == 404
 
     def test_bio_link_guard(self, client):
         c, _, _ = client
