@@ -34,7 +34,9 @@ function PipelineStatus() {
   const { data } = useQuery({
     queryKey: ["proxy-pipeline"],
     queryFn: async () => (await api.get("/proxies/pipeline")).data as Pipeline,
-    refetchInterval: 20000,
+    // Realtime first (WS proxy_pool_update invalidates this key); the poll
+    // below is only a backstop for dropped frames.
+    refetchInterval: 60000,
   });
   if (!data) return null;
   const c = data.counts;
@@ -51,7 +53,7 @@ function PipelineStatus() {
       <div className="mb-2 flex items-center gap-2">
         <CardTitle>Pipeline status</CardTitle>
         <span className="relative flex h-2 w-2"><span className="absolute h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" /><span className="h-2 w-2 rounded-full bg-emerald-500" /></span>
-        <span className="ml-auto text-[11px] text-zinc-400">live · refreshes every 20s</span>
+        <span className="ml-auto text-[11px] text-zinc-400">live · realtime</span>
       </div>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {tiles.map((t) => (
@@ -105,13 +107,13 @@ export default function ProxiesPage() {
   const qc = useQueryClient();
   const { data, isLoading, isError, refetch } = useProxies();
   const { data: sourceRows } = useProxySources();
-  const create = useApiMutation("post", [["proxies"]], "Proxy added");
-  const remove = useApiMutation("delete", [["proxies"]]);
-  const test = useApiMutation("post", [["proxies"]]);
-  const checkAll = useApiMutation("post", [["proxies"]]);
-  const refreshPool = useApiMutation("post", [["proxies"], ["proxy-sources"]]);
-  const purgePool = useApiMutation("post", [["proxies"]]);
-  const resetAll = useApiMutation("post", [["proxies"], ["accounts"]]);
+  const create = useApiMutation("post", [["proxies"], ["proxy-pipeline"]], "Proxy added");
+  const remove = useApiMutation("delete", [["proxies"], ["proxy-pipeline"]]);
+  const test = useApiMutation("post", [["proxies"], ["proxy-pipeline"]]);
+  const checkAll = useApiMutation("post", [["proxies"], ["proxy-pipeline"]]);
+  const refreshPool = useApiMutation("post", [["proxies"], ["proxy-pipeline"], ["proxy-sources"]]);
+  const purgePool = useApiMutation("post", [["proxies"], ["proxy-pipeline"]]);
+  const resetAll = useApiMutation("post", [["proxies"], ["proxy-pipeline"], ["accounts"]]);
   const createSource = useApiMutation("post", [["proxy-sources"]], "Source added");
   const toggleSource = useApiMutation("put", [["proxy-sources"]], "Source updated");
   const removeSource = useApiMutation("delete", [["proxy-sources"]], "Source deleted");
@@ -163,6 +165,7 @@ export default function ProxiesPage() {
       setImpResult(data as ProxyImportResult);
       setImpFile(null);
       qc.invalidateQueries({ queryKey: ["proxies"] });
+      qc.invalidateQueries({ queryKey: ["proxy-pipeline"] });
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Import failed";
       setImpError(String(msg));

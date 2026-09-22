@@ -535,6 +535,11 @@ async def test_proxy(pid: int, _: str = Depends(get_current_admin), db: AsyncSes
     p.last_checked = dt2.datetime.now(dt2.timezone.utc)
     p.fail_count = 0 if ok else p.fail_count + 1
     await db.commit()
+    import asyncio
+
+    from app.tasks.sync_helpers import publish_sync
+
+    await asyncio.to_thread(publish_sync, "proxy_pool_update", {"tested": p.id})
     return {"healthy": ok, "latency_ms": latency}
 
 
@@ -627,7 +632,7 @@ async def purge_pool_now(request: Request, _: str = Depends(get_current_admin)):
     import concurrent.futures
 
     from app.database import SyncSessionLocal
-    from app.tasks.sync_helpers import get_setting, purge_stale_auto_proxies
+    from app.tasks.sync_helpers import get_setting, publish_sync, purge_stale_auto_proxies
 
     def _run() -> int:
         with SyncSessionLocal() as s:
@@ -646,6 +651,7 @@ async def purge_pool_now(request: Request, _: str = Depends(get_current_admin)):
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         n = pool.submit(_run).result(timeout=120)
     await log_event("INFO", "proxy", f"Manual pool purge: {n} stale auto rows removed")
+    publish_sync("proxy_pool_update", {"purged": n})
     return {"purged": n}
 
 
@@ -661,6 +667,7 @@ async def reset_proxies_now(request: Request, _: str = Depends(get_current_admin
     from sqlalchemy import update
 
     from app.database import SyncSessionLocal
+    from app.tasks.sync_helpers import publish_sync
 
     def _run() -> dict:
         with SyncSessionLocal() as s:
@@ -707,6 +714,7 @@ async def reset_proxies_now(request: Request, _: str = Depends(get_current_admin
         f"Manual proxy reset: {res['deleted_auto']} auto deleted, "
         f"{res['reset_manual']} manual zeroed, {res['unlinked_accounts']} accounts unlinked",
     )
+    publish_sync("proxy_pool_update", res)
     return res
 
 

@@ -66,6 +66,7 @@ export function useRealtimeFeed(enabled: boolean) {
             qc.invalidateQueries({ queryKey: ["logs"] });
           } else if (msg.event === "proxy_pool_update") {
             qc.invalidateQueries({ queryKey: ["proxies"] });
+            qc.invalidateQueries({ queryKey: ["proxy-pipeline"] });
             qc.invalidateQueries({ queryKey: ["proxy-sources"] });
           }
         } catch {
