@@ -10,6 +10,18 @@ import type { Account, Bio, IgProfile } from "@/types/models";
 type Privacy = "" | "private" | "public";
 const privToBody = (p: Privacy) => (p === "" ? null : p === "private");
 
+/** Error text that never comes back bare: backend detail when present,
+// otherwise the HTTP status / abort reason plus a pointer to the Logs page
+// (the server always logs IG failures there with the egress host). */
+function errDetail(e: unknown, fallback: string) {
+  const r = e as { response?: { status?: number; data?: { detail?: unknown } }; code?: string };
+  const d = r?.response?.data?.detail;
+  if (d) return String(d);
+  if (r?.response?.status) return `${fallback} (HTTP ${r.response.status} — full trace is on the Logs page)`;
+  if (r?.code === "ECONNABORTED") return `${fallback} (request timed out in the browser)`;
+  return `${fallback} (no response — check the Logs page)`;
+}
+
 export default function BiosPage() {
   const { data: accounts } = useAccounts();
   const [accountId, setAccountId] = useState("");
@@ -72,8 +84,7 @@ export default function BiosPage() {
         setBio(saved);
       }
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Apply failed";
-      setOpError(String(msg));
+      setOpError(errDetail(e, "Apply failed"));
     } finally {
       setApplyBusy(null);
     }
@@ -93,8 +104,7 @@ export default function BiosPage() {
       setBio(data as Bio);
       toast("success", "Profile picture uploaded — hit Apply picture to publish it");
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Picture upload failed";
-      setOpError(String(msg));
+      setOpError(errDetail(e, "Picture upload failed"));
     } finally {
       setPicBusy(false);
     }
@@ -109,8 +119,7 @@ export default function BiosPage() {
       setBio(data as Bio);
       toast("success", "Profile picture removed");
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Picture delete failed";
-      setOpError(String(msg));
+      setOpError(errDetail(e, "Picture delete failed"));
     } finally {
       setPicBusy(false);
     }
@@ -128,8 +137,7 @@ export default function BiosPage() {
       if (fresh) setBio(fresh);
       setCurrent(undefined); // live snapshot is stale now — re-compare to verify
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Live photo removal failed";
-      setOpError(String(msg));
+      setOpError(errDetail(e, "Live photo removal failed"));
     } finally {
       setApplyBusy(null);
     }
