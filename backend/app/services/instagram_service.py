@@ -297,7 +297,12 @@ class InstagramService:
                         cl.dump_settings(self.session_path)
                     except Exception:
                         pass
-            res = cl.private_request("accounts/remove_profile_picture/")
+            # POST with signed action data (same shape as set_private/_public):
+            # a bare private_request() sends GET, which IG answers with 405.
+            if not cl.user_id:
+                return "login_required: no user id in session"
+            data = cl.with_action_data({"_uid": str(cl.user_id), "_uuid": cl.uuid})
+            res = cl.private_request("accounts/remove_profile_picture/", data)
             if not res or res.get("status") != "ok":
                 return f"generic: unexpected response {res}"
             if self.session_path:
