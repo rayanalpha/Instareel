@@ -150,17 +150,21 @@ async def apply_bio(
     if not want_all and not (bio_text or link or full_name or picture or make_private is not None):
         raise HTTPException(422, "Selected section is empty — nothing to apply")
     acc_id = acc.id
-    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        err = pool.submit(
-            svc.apply_profile, username, password,
-            biography=bio_text, external_url=link, full_name=full_name,
-            make_private=make_private, picture_path=picture,
-        ).result(timeout=180)
-    if err:
-        from urllib.parse import urlsplit as _urlsplit
+    from urllib.parse import urlsplit as _urlsplit
 
-        egress = _urlsplit(purl).hostname if purl else "direct"
+    egress = _urlsplit(purl).hostname if purl else "direct"
+    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            err = pool.submit(
+                svc.apply_profile, username, password,
+                biography=bio_text, external_url=link, full_name=full_name,
+                make_private=make_private, picture_path=picture,
+            ).result(timeout=180)
+    except concurrent.futures.TimeoutError:
+        await log_event("ERROR", "account", f"Profile apply timed out for account {acc_id} via {egress}")
+        raise HTTPException(504, f"Profile apply timed out after 180s [via {egress}] — the proxy route stalled")
+    if err:
         await log_event("ERROR", "account", f"Profile apply failed for account {acc_id} via {egress}: {err}")
         raise HTTPException(502, f"Profile apply failed: {err} [via {egress}]")
     b = await db.get(BioConfig, bid)
@@ -281,14 +285,18 @@ async def remove_live_picture(
     username, password = acc.username, decrypt_secret(acc.password_enc)
     purl = sched.resolve_proxy_url(db, acc)
     acc_id = acc.id
-    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        err = pool.submit(
-            svc.remove_live_picture, username, password,
-        ).result(timeout=180)
     from urllib.parse import urlsplit as _urlsplit
 
     egress = _urlsplit(purl).hostname if purl else "direct"
+    svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            err = pool.submit(
+                svc.remove_live_picture, username, password,
+            ).result(timeout=180)
+    except concurrent.futures.TimeoutError:
+        await log_event("ERROR", "account", f"Live picture removal timed out for account {acc_id} via {egress}")
+        raise HTTPException(504, f"Live picture removal timed out after 180s [via {egress}] — the proxy route stalled")
     if err:
         await log_event("ERROR", "account", f"Live picture removal failed for account {acc_id} via {egress}: {err}")
         raise HTTPException(502, f"Live picture removal failed: {err} [via {egress}]")

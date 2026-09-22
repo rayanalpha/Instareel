@@ -55,7 +55,9 @@ export default function BiosPage() {
     setApplyBusy(section);
     try {
       const saved = (await api.put(`/bios/${bio.id}`, { account_id: bio.account_id, ...patch })).data as Bio;
-      await api.post(`/bios/${bio.id}/apply`, { fields: [section] });
+      // IG round-trips through a proxy can take minutes (session + edit);
+      // the global 30s axios timeout would abort with a detail-less error.
+      await api.post(`/bios/${bio.id}/apply`, { fields: [section] }, { timeout: 300000 });
       toast("success", "Applied — check Instagram");
       // Re-read for the fresh last_applied timestamp.
       const list = (await api.get("/bios")).data as Bio[];
@@ -119,7 +121,7 @@ export default function BiosPage() {
     setOpError("");
     setApplyBusy("remove-live");
     try {
-      await api.post(`/bios/${bio.id}/picture/remove-live`);
+      await api.post(`/bios/${bio.id}/picture/remove-live`, {}, { timeout: 300000 });
       toast("success", "Live profile photo removed");
       const list = (await api.get("/bios")).data as Bio[];
       const fresh = list.find((x) => x.id === bio.id);
