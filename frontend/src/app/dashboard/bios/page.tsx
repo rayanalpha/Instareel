@@ -61,6 +61,22 @@ export default function BiosPage() {
     }
   }
 
+  async function deletePicture(id: number) {
+    if (!confirm("Remove the stored profile picture? The bio will apply without touching the Instagram photo.")) return;
+    setPicError("");
+    setPicBusy(id);
+    try {
+      await api.delete(`/bios/${id}/picture`);
+      toast("success", "Profile picture removed");
+      qc.invalidateQueries({ queryKey: ["bios"] });
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Picture delete failed";
+      setPicError(String(msg));
+    } finally {
+      setPicBusy(null);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-extrabold tracking-tight">Profile rotation</h1>
@@ -131,6 +147,11 @@ export default function BiosPage() {
                   {picBusy === b.id ? "Uploading…" : b.has_picture ? "Replace pic" : "Upload pic"}
                   <input type="file" className="hidden" accept="image/*" onChange={(e) => uploadPicture(b.id, e.target.files?.[0] ?? null)} />
                 </label>
+                {b.has_picture && (
+                  <button className="btn-ghost !py-1.5 text-xs text-red-500" disabled={picBusy === b.id} onClick={() => deletePicture(b.id)}>
+                    {picBusy === b.id ? "Removing…" : "Remove pic"}
+                  </button>
+                )}
                 <button className="btn-ghost !py-1.5 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm("Delete this profile config?")) remove.mutate({ url: `/bios/${b.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
               </div>
             </Card>
