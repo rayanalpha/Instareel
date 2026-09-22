@@ -158,7 +158,11 @@ async def apply_bio(
             make_private=make_private, picture_path=picture,
         ).result(timeout=180)
     if err:
-        raise HTTPException(502, f"Profile apply failed: {err}")
+        from urllib.parse import urlsplit as _urlsplit
+
+        egress = _urlsplit(purl).hostname if purl else "direct"
+        await log_event("ERROR", "account", f"Profile apply failed for account {acc_id} via {egress}: {err}")
+        raise HTTPException(502, f"Profile apply failed: {err} [via {egress}]")
     b = await db.get(BioConfig, bid)
     if b:
         b.last_applied = dt.datetime.now(dt.timezone.utc)
@@ -279,9 +283,15 @@ async def remove_live_picture(
     acc_id = acc.id
     svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        err = pool.submit(svc.remove_live_picture, username, password).result(timeout=180)
+        err = pool.submit(
+            svc.remove_live_picture, username, password,
+        ).result(timeout=180)
+    from urllib.parse import urlsplit as _urlsplit
+
+    egress = _urlsplit(purl).hostname if purl else "direct"
     if err:
-        raise HTTPException(502, f"Live picture removal failed: {err}")
+        await log_event("ERROR", "account", f"Live picture removal failed for account {acc_id} via {egress}: {err}")
+        raise HTTPException(502, f"Live picture removal failed: {err} [via {egress}]")
     b = await db.get(BioConfig, bid)
     if b:
         b.last_applied = dt.datetime.now(dt.timezone.utc)
