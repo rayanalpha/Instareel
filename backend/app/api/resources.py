@@ -36,6 +36,31 @@ def _audio_out(t: AudioTrack) -> AudioOut:
 
 # ---- Bios (bio text + link + full name + picture + privacy) ----
 
+async def _resolve_route(acc_id: int) -> "tuple[bool, str | None]":
+    """(reachable, proxy_url) for an account, callable from async endpoints.
+
+    The sched.* helpers are written for sync sessions (celery tasks): called
+    with an AsyncSession, session.get/session.execute return un-awaited
+    coroutines and every proxied call 500s (direct worked only by accident
+    of an early return). Re-resolve the account in a short-lived sync
+    session inside a thread instead.
+    """
+    import asyncio
+
+    from app.database import SyncSessionLocal
+    from app.tasks import sync_helpers as sched
+
+    def _run() -> "tuple[bool, str | None]":
+        with SyncSessionLocal() as s:
+            a = s.get(Account, acc_id)
+            if a is None:
+                return False, None
+            if not sched.account_reachable(s, a):
+                return False, None
+            return True, sched.resolve_proxy_url(s, a)
+
+    return await asyncio.to_thread(_run)
+
 def _bio_out(b: BioConfig) -> BioOut:
     import os as _os
 
@@ -125,15 +150,14 @@ async def apply_bio(
     from app.services.instagram_service import InstagramService
     from app.utils.instagram_helpers import session_path_for
 
-    from app.tasks import sync_helpers as sched
-
     b = await db.get(BioConfig, bid)
     if not b:
         raise HTTPException(404, "Bio not found")
     acc = await db.get(Account, b.account_id)
     if not acc:
         raise HTTPException(404, "Account not found")
-    if not sched.account_reachable(db, acc):
+    reachable, purl = await _resolve_route(acc.id)
+    if not reachable:
         raise HTTPException(409, "No healthy proxy route for this account right now")
     fields = set((body.fields if body and body.fields else []))
     unknown = fields - {"bio", "link", "full_name", "picture", "privacy"}
@@ -141,7 +165,6 @@ async def apply_bio(
         raise HTTPException(422, f"Unknown section(s): {sorted(unknown)}")
     want_all = not fields
     username, password = acc.username, decrypt_secret(acc.password_enc)
-    purl = sched.resolve_proxy_url(db, acc)
     bio_text: str = b.text if (want_all or "bio" in fields) else ""
     link: str = (b.link_url or "") if (want_all or "link" in fields) else ""
     full_name: str = (b.full_name or "") if (want_all or "full_name" in fields) else ""
@@ -272,18 +295,16 @@ async def remove_live_picture(
     from app.services.instagram_service import InstagramService
     from app.utils.instagram_helpers import session_path_for
 
-    from app.tasks import sync_helpers as sched
-
     b = await db.get(BioConfig, bid)
     if not b:
         raise HTTPException(404, "Bio not found")
     acc = await db.get(Account, b.account_id)
     if not acc:
         raise HTTPException(404, "Account not found")
-    if not sched.account_reachable(db, acc):
+    reachable, purl = await _resolve_route(acc.id)
+    if not reachable:
         raise HTTPException(409, "No healthy proxy route for this account right now")
     username, password = acc.username, decrypt_secret(acc.password_enc)
-    purl = sched.resolve_proxy_url(db, acc)
     acc_id = acc.id
     from urllib.parse import urlsplit as _urlsplit
 
@@ -320,8 +341,6 @@ async def bio_current(
     from app.services.instagram_service import InstagramService
     from app.utils.instagram_helpers import session_path_for
 
-    from app.tasks import sync_helpers as sched
-
     b = await db.get(BioConfig, bid)
     if not b:
         raise HTTPException(404, "Bio not found")
@@ -329,7 +348,9 @@ async def bio_current(
     if not acc:
         raise HTTPException(404, "Account not found")
     username = acc.username
-    purl = sched.resolve_proxy_url(db, acc)
+    reachable, purl = await _resolve_route(acc.id)
+    if not reachable:
+        raise HTTPException(409, "No healthy proxy route for this account right now")
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         try:
             data = pool.submit(

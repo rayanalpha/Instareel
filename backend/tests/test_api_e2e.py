@@ -337,14 +337,35 @@ class TestResources:
         assert h.status_code == 200 and h.json() == []
         assert c.delete(f"/api/v1/bios/{bid}").status_code == 204
 
-    def test_bio_ensure_and_section_apply_validation(self, client):
-        c, _, _ = client
+    def test_bio_ensure_and_section_apply_validation(self, client, tmp_path, monkeypatch):
+        import asyncio
+
+        c, maker, _ = client
+        # _resolve_route runs on SyncSessionLocal — repoint it at the isolated DB.
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        import app.database
+
+        sync_engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+        monkeypatch.setattr(app.database, "SyncSessionLocal", sessionmaker(bind=sync_engine))
         acc = c.post("/api/v1/accounts", json={"username": "s1", "password": "pw"}).json()["id"]
         assert c.post("/api/v1/bios/ensure", json={"account_id": 999}).status_code == 404
         b1 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
         assert b1["text"] == "" and b1["account_id"] == acc
         b2 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
         assert b2["id"] == b1["id"]  # idempotent: one config per account
+        # Attaching a proxy must not 500 the route (sync/async session bug):
+        # validation still answers first, through the resolved proxy.
+        px = c.post("/api/v1/proxies", json={"url": "http://9.9.9.9:8080", "protocol": "http"}).json()
+
+        async def link():
+            async with maker() as s:
+                x = await s.get(Account, acc)
+                x.proxy_id = px["id"]
+                await s.commit()
+
+        asyncio.get_event_loop().run_until_complete(link())
         # Partial PUT keeps the other sections intact.
         c.put(f"/api/v1/bios/{b1['id']}", json={"account_id": acc, "text": "hello"})
         row = c.get("/api/v1/bios").json()[0]
