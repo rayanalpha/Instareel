@@ -381,6 +381,53 @@ class TestResources:
         assert set(body["last_runs"]) == {"health_check", "pool_refresh", "purge", "auto_disabled"}
         assert isinstance(body["recent"], list)
 
+    def test_proxy_reset_zeroes_everything(self, client, tmp_path, monkeypatch):
+        import asyncio
+
+        c, maker, _ = client
+        # The reset endpoint runs on SyncSessionLocal (same pattern as pool
+        # purge) — repoint it at this test's isolated DB file.
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        import app.database
+
+        sync_engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+        monkeypatch.setattr(app.database, "SyncSessionLocal", sessionmaker(bind=sync_engine))
+        man = c.post("/api/v1/proxies", json={"url": "http://9.9.9.9:8080", "protocol": "http"}).json()
+        auto = c.post("/api/v1/proxies", json={"url": "http://8.8.8.8:8080", "protocol": "http"}).json()
+        acc = c.post("/api/v1/accounts", json={"username": "rz", "password": "pw"}).json()["id"]
+
+        async def seed():
+            async with maker() as s:
+                a = await s.get(Proxy, auto["id"])
+                a.source = "gh-test"
+                m = await s.get(Proxy, man["id"])
+                m.is_healthy = True
+                m.fail_count = 3
+                m.latency_ms = 120
+                m.last_error = "boom"
+                x = await s.get(Account, acc)
+                x.proxy_id = man["id"]
+                await s.commit()
+
+        asyncio.get_event_loop().run_until_complete(seed())
+        r = c.post("/api/v1/proxies/reset")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"deleted_auto": 1, "reset_manual": 1, "unlinked_accounts": 1}
+        rows = c.get("/api/v1/proxies").json()
+        assert [p["url"] for p in rows] == ["http://9.9.9.9:8080"]
+        assert rows[0]["source"] == "manual"
+
+        async def check():
+            async with maker() as s:
+                m = await s.get(Proxy, man["id"])
+                assert (m.is_healthy, m.fail_count, m.latency_ms, m.last_checked, m.last_error) == (False, 0, None, None, None)
+                assert (await s.get(Account, acc)).proxy_id is None
+                assert (await s.execute(select(Proxy))).scalars().all()[0].source == "manual"
+
+        asyncio.get_event_loop().run_until_complete(check())
+
     def test_rules_captions_crud(self, client):
         c, _, _ = client
         acc = c.post("/api/v1/accounts", json={"username": "r1", "password": "pw"}).json()["id"]

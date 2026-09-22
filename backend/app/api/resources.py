@@ -649,6 +649,67 @@ async def purge_pool_now(request: Request, _: str = Depends(get_current_admin)):
     return {"purged": n}
 
 
+@proxy_router.post("/reset")
+@limiter.limit("5/minute")
+async def reset_proxies_now(request: Request, _: str = Depends(get_current_admin)):
+    """Zero the whole proxy section: delete every auto-fetched row, reset
+    manual rows to a fresh NEW state, and unlink all accounts from proxies
+    so nothing routes through an unverified proxy afterwards. Sources and
+    pool settings are left untouched."""
+    import concurrent.futures
+
+    from sqlalchemy import update
+
+    from app.database import SyncSessionLocal
+
+    def _run() -> dict:
+        with SyncSessionLocal() as s:
+            # Unlink first so no account dangles on (or silently keeps
+            # routing through) a deleted/unverified proxy.
+            unlinked = (
+                s.execute(
+                    update(Account).where(Account.proxy_id.isnot(None)).values(proxy_id=None)
+                ).rowcount
+            )
+            auto_rows = (
+                s.execute(
+                    select(Proxy).where(Proxy.source.isnot(None), Proxy.source != "manual")
+                )
+                .scalars()
+                .all()
+            )
+            for p in auto_rows:
+                s.delete(p)
+            manuals = (
+                s.execute(
+                    select(Proxy).where((Proxy.source.is_(None)) | (Proxy.source == "manual"))
+                )
+                .scalars()
+                .all()
+            )
+            for p in manuals:
+                p.is_healthy = False
+                p.fail_count = 0
+                p.latency_ms = None
+                p.last_checked = None
+                p.last_error = None
+            s.commit()
+            return {
+                "deleted_auto": len(auto_rows),
+                "reset_manual": len(manuals),
+                "unlinked_accounts": unlinked,
+            }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        res = pool.submit(_run).result(timeout=120)
+    await log_event(
+        "INFO", "proxy",
+        f"Manual proxy reset: {res['deleted_auto']} auto deleted, "
+        f"{res['reset_manual']} manual zeroed, {res['unlinked_accounts']} accounts unlinked",
+    )
+    return res
+
+
 # ---- Effects ----
 
 @effect_router.get("", response_model=list[EffectOut])

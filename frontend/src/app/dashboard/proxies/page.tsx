@@ -111,6 +111,7 @@ export default function ProxiesPage() {
   const checkAll = useApiMutation("post", [["proxies"]]);
   const refreshPool = useApiMutation("post", [["proxies"], ["proxy-sources"]]);
   const purgePool = useApiMutation("post", [["proxies"]]);
+  const resetAll = useApiMutation("post", [["proxies"], ["accounts"]]);
   const createSource = useApiMutation("post", [["proxy-sources"]], "Source added");
   const toggleSource = useApiMutation("put", [["proxy-sources"]], "Source updated");
   const removeSource = useApiMutation("delete", [["proxy-sources"]], "Source deleted");
@@ -177,6 +178,7 @@ export default function ProxiesPage() {
         <button className="btn-ghost ml-auto !py-1.5 text-xs" disabled={checkAll.isPending} onClick={() => checkAll.mutate({ url: "/proxies/check-all" })}>{checkAll.isPending ? "Checking…" : "Health-check all"}</button>
         <button className="btn-ghost !py-1.5 text-xs" disabled={refreshPool.isPending} onClick={() => refreshPool.mutate({ url: "/proxies/pool/refresh" })}>{refreshPool.isPending ? "Refreshing…" : "Refresh auto-pool"}</button>
         <button className="btn-ghost !py-1.5 text-xs" disabled={purgePool.isPending} onClick={() => { if (confirm("Delete long-dead auto-fetched proxies? Manual ones are never touched.")) purgePool.mutate({ url: "/proxies/pool/purge" }); }}>{purgePool.isPending ? "Purging…" : "Purge stale"}</button>
+        <button className="btn-ghost !py-1.5 text-xs !text-red-500" disabled={resetAll.isPending} onClick={() => { if (confirm("RESET ALL proxies?\n\n• Deletes EVERY auto-fetched proxy\n• Zeroes manual proxies (health/stats cleared, re-verify with Health-check)\n• Unlinks ALL accounts from their proxies\n\nSources and pool settings are kept. This cannot be undone.")) resetAll.mutate({ url: "/proxies/reset" }); }}>{resetAll.isPending ? "Resetting…" : "Reset all"}</button>
       </div>
       {(() => {
         const byCountry = new Map<string, number>();
