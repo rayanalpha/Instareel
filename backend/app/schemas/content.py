@@ -13,11 +13,16 @@ class ScheduleRuleIn(BaseModel):
     is_active: bool = True
     preferred_effect: str | None = None
     caption_template_id: int | None = None
+    # Pinned video for one-shot scheduling (NULL = draw from the queue).
+    pinned_video_id: int | None = None
 
 
 class ScheduleRuleOut(ScheduleRuleIn):
     id: int
     created_at: dt.datetime
+    # Display helpers for the pinned video (resolved by the API, not stored).
+    pinned_video_label: str | None = None
+    pinned_video_status: str | None = None
 
 
 class CaptionIn(BaseModel):

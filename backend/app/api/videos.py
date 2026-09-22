@@ -177,6 +177,22 @@ async def delete_video(video_id: int, _: str = Depends(get_current_admin), db: A
     n_posts = (await db.execute(select(_func.count(Post.id)).where(Post.video_id == video_id))).scalar() or 0
     if n_posts:
         raise HTTPException(409, f"Video has {n_posts} post(s) — delete them first to preserve history")
+    # Retire active rules pinned to this video — a dangling pin would wait
+    # forever at fire time. Queue-mode rules are untouched.
+    from app.models import ScheduleRule
+
+    pinned = (
+        await db.execute(
+            select(ScheduleRule).where(
+                ScheduleRule.pinned_video_id == video_id, ScheduleRule.is_active.is_(True)
+            )
+        )
+    ).scalars().all()
+    for r in pinned:
+        r.is_active = False
+    if pinned:
+        names = ", ".join(f"'{r.name}'" for r in pinned)
+        await log_event("INFO", "schedule", f"Video #{video_id} deleted — retired pinned rule(s): {names}")
     for path in (v.raw_path, v.processed_path, v.thumbnail_path, v.custom_thumbnail_path):
         try:
             if path and os.path.exists(path):

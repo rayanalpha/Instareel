@@ -23,6 +23,10 @@ class ScheduleRule(Base, TimestampMixin):
     caption_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("caption_templates.id"), nullable=True
     )
+    # Hybrid scheduling: when set, this rule fires exactly this video (then
+    # retires). When NULL, the rule draws oldest-processed from the queue.
+    # preferred_effect is ignored while pinned.
+    pinned_video_id: Mapped[int | None] = mapped_column(ForeignKey("videos.id"), nullable=True)
 
 
 class CaptionTemplate(Base, TimestampMixin):

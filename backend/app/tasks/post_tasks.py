@@ -21,6 +21,7 @@ def check_and_post(self):
     from app.database import SyncSessionLocal
     from app.models import Post, PostStatus
     from app.tasks import sync_helpers as sched
+    from app.tasks.sync_helpers import log_event_sync
 
     try:
         with SyncSessionLocal() as s:
@@ -37,12 +38,23 @@ def check_and_post(self):
                     # Its proxy is down and no spare is healthy — leave the
                     # slot for the next tick instead of queueing a doomed post.
                     continue
-                video = sched.next_video(s, rule.preferred_effect)
-                if not video or video.id in used_video_ids:
+                video, disposition = sched.resolve_rule_video(s, rule, used_video_ids)
+                if disposition in ("retire_gone", "retire_posted"):
+                    why = (
+                        "pinned video was deleted"
+                        if disposition == "retire_gone"
+                        else "pinned video already posted elsewhere"
+                    )
+                    rule.is_active = False
+                    s.commit()
+                    log_event_sync("INFO", "schedule", f"Rule '{rule.name}' retired: {why}")
                     continue
-                if sched.video_already_queued(s, video.id):
-                    # Queued by another rule (or the API) — one pending post
-                    # per video, so it can never upload twice.
+                if disposition != "fire" or video is None:
+                    if rule.pinned_video_id and disposition != "fire":
+                        log_event_sync(
+                            "INFO", "schedule",
+                            f"Rule '{rule.name}' waiting: pinned video not postable yet",
+                        )
                     continue
                 caption, _ = sched.pick_caption(s, rule.caption_template_id)
                 tags = sched.pick_hashtags(s)
@@ -61,6 +73,11 @@ def check_and_post(self):
                 )
                 s.flush()  # make the reservation visible to later rules in this tick
                 s.commit()  # per-rule commit: one bad rule can't void the whole tick
+                if rule.pinned_video_id:
+                    # One-shot fired: retire so tomorrow's tick doesn't re-post.
+                    rule.is_active = False
+                    s.commit()
+                    log_event_sync("INFO", "schedule", f"Rule '{rule.name}' fired its pinned video and retired")
                 used_video_ids.add(video.id)
                 created += 1
 

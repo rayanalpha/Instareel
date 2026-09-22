@@ -2,10 +2,14 @@
 import json
 import logging
 import random
+from typing import TYPE_CHECKING
 
 import redis
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.models import ScheduleRule, Video
 
 _channel = "igfunnel:events"
 log = logging.getLogger("igfunnel")
@@ -479,6 +483,36 @@ def next_video(session, effect: "str | None" = None):
         if video:
             return video
     return session.execute(base.order_by(Video.created_at.asc()).limit(1)).scalars().first()
+
+
+def resolve_rule_video(session, rule: "ScheduleRule", used_ids: "set[int]") -> "tuple[Video | None, str]":
+    """Pick the video for a due rule. Returns (video|None, disposition).
+
+    Dispositions: "fire" (post it, retire rule if pinned), "retire_gone"
+    (pin target deleted), "retire_posted" (pin already posted elsewhere),
+    "wait" (pinned video not postable yet — still processing/failed/queued;
+    rule stays armed), "empty" (queue mode, nothing processed).
+    """
+    from app.models import Video, VideoStatus
+
+    pin = getattr(rule, "pinned_video_id", None)
+    if pin:
+        video = session.get(Video, pin)
+        if video is None:
+            return None, "retire_gone"
+        if video.status == VideoStatus.posted:
+            return None, "retire_posted"
+        if video.status != VideoStatus.processed:
+            return None, "wait"
+        if video.id in used_ids or video_already_queued(session, video.id):
+            return None, "wait"
+        return video, "fire"
+    video = next_video(session, rule.preferred_effect)
+    if not video or video.id in used_ids:
+        return None, "empty"
+    if video_already_queued(session, video.id):
+        return None, "empty"
+    return video, "fire"
 
 
 def claim_post(session, post_id: int) -> str:

@@ -467,6 +467,58 @@ class TestResources:
 
         asyncio.get_event_loop().run_until_complete(check())
 
+    def test_rule_pin_flow(self, client):
+        import asyncio
+
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="pin1", password_enc="x"))
+                s.add(Video(original_filename="a.mp4", raw_path="/tmp/a.mp4",
+                            md5_hash="pina", status=VideoStatus.processed))
+                s.add(Video(original_filename="b.mp4", raw_path="/tmp/b.mp4",
+                            md5_hash="pinb", status=VideoStatus.uploaded))
+                s.add(Video(original_filename="c.mp4", raw_path="/tmp/c.mp4",
+                            md5_hash="pinc", status=VideoStatus.processed))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "pin1"))).scalar_one()
+                va = (await s.execute(select(Video).where(Video.md5_hash == "pina"))).scalar_one()
+                vb = (await s.execute(select(Video).where(Video.md5_hash == "pinb"))).scalar_one()
+                vc = (await s.execute(select(Video).where(Video.md5_hash == "pinc"))).scalar_one()
+                return acc.id, va.id, vb.id, vc.id
+
+        acc, va, vb, vc = asyncio.get_event_loop().run_until_complete(seed())
+        base = {"name": "pr", "hour": 10, "account_id": acc}
+        assert c.post("/api/v1/schedule", json={**base, "pinned_video_id": 999999}).status_code == 404
+        assert c.post("/api/v1/schedule", json={**base, "pinned_video_id": vb}).status_code == 422
+        r = c.post("/api/v1/schedule", json={**base, "pinned_video_id": va})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        rid = body["id"]
+        assert body["pinned_video_id"] == va
+        assert body["pinned_video_label"] == f"#{va} a.mp4"
+        assert body["pinned_video_status"] == "processed"
+        # Double-pin rejected; bad payloads rejected.
+        r2 = c.post("/api/v1/schedule", json={"name": "pr2", "hour": 11, "account_id": acc}).json()["id"]
+        assert c.post(f"/api/v1/schedule/{r2}/pin", json={"video_id": va}).status_code == 422
+        assert c.post(f"/api/v1/schedule/{rid}/pin", json={"video_id": 999999}).status_code == 404
+        assert c.post(f"/api/v1/schedule/{rid}/pin", json={}).status_code == 422
+        assert c.post("/api/v1/schedule/999999/pin", json={"video_id": va}).status_code == 404
+        # Queued videos can't be pinned.
+        assert c.post("/api/v1/posts/schedule",
+                       json={"video_id": vc, "account_id": acc, "caption": "q"}).status_code == 201
+        assert c.post(f"/api/v1/schedule/{r2}/pin", json={"video_id": vc}).status_code == 422
+        # Unpin falls back to queue mode; re-pin re-arms.
+        assert c.post(f"/api/v1/schedule/{rid}/unpin").json()["pinned_video_id"] is None
+        repin = c.post(f"/api/v1/schedule/{rid}/pin", json={"video_id": va}).json()
+        assert repin["pinned_video_id"] == va and repin["is_active"] is True
+        # Deleting the video retires the pin (keeps the reference for display).
+        assert c.delete(f"/api/v1/videos/{va}").status_code == 204
+        row = next(x for x in c.get("/api/v1/schedule").json() if x["id"] == rid)
+        assert row["is_active"] is False and row["pinned_video_id"] == va
+        assert row["pinned_video_label"] is None
+
     def test_rules_captions_crud(self, client):
         c, _, _ = client
         acc = c.post("/api/v1/accounts", json={"username": "r1", "password": "pw"}).json()["id"]

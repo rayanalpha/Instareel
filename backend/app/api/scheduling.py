@@ -1,4 +1,6 @@
 """Schedule rules, captions, hashtag sets."""
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,23 +11,75 @@ from app.schemas.content import (
     CaptionIn, CaptionOut, HashtagSetIn, HashtagSetOut, ScheduleRuleIn, ScheduleRuleOut,
 )
 
+if TYPE_CHECKING:
+    from app.models import Video
+
 schedule_router = APIRouter()
 caption_router = APIRouter()
 hashtag_router = APIRouter()
 
 
-def _rule_out(r: ScheduleRule) -> ScheduleRuleOut:
+def _rule_out(r: ScheduleRule, pin_map: "dict[int, Video] | None" = None) -> ScheduleRuleOut:
+    label = status = None
+    if r.pinned_video_id and pin_map is not None:
+        v = pin_map.get(r.pinned_video_id)
+        if v is not None:
+            label = f"#{v.id} {v.original_filename}"
+            try:
+                status = v.status.value
+            except AttributeError:
+                status = str(v.status)
     return ScheduleRuleOut(
         id=r.id, name=r.name, day_of_week=r.day_of_week, hour=r.hour, minute=r.minute,
         account_id=r.account_id, is_active=r.is_active, preferred_effect=r.preferred_effect,
         caption_template_id=r.caption_template_id, created_at=r.created_at,
+        pinned_video_id=r.pinned_video_id,
+        pinned_video_label=label, pinned_video_status=status,
     )
+
+
+async def _pin_map(db: AsyncSession, rules: list[ScheduleRule]) -> "dict[int, Video]":
+    from app.models import Video
+
+    ids = {r.pinned_video_id for r in rules if r.pinned_video_id}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(Video).where(Video.id.in_(ids)))).scalars().all()
+    return {v.id: v for v in rows}
+
+
+async def _validate_pin(db: AsyncSession, video_id: int, exclude_rule_id: int | None = None):
+    """Shared pin guards: exists, processed, not queued, not pinned elsewhere."""
+    from app.models import Post, PostStatus, Video, VideoStatus
+
+    v = await db.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "Pinned video not found")
+    if v.status != VideoStatus.processed:
+        raise HTTPException(422, f"Only processed videos can be pinned (video is {v.status.value})")
+    pending = (
+        await db.execute(
+            select(Post.id).where(Post.video_id == video_id, Post.status == PostStatus.scheduled).limit(1)
+        )
+    ).first()
+    if pending:
+        raise HTTPException(422, "Video is already queued for posting")
+    q = select(ScheduleRule).where(
+        ScheduleRule.pinned_video_id == video_id, ScheduleRule.is_active.is_(True)
+    )
+    if exclude_rule_id:
+        q = q.where(ScheduleRule.id != exclude_rule_id)
+    clash = (await db.execute(q)).scalars().first()
+    if clash:
+        raise HTTPException(422, f"Video is already pinned by rule '{clash.name}'")
+    return v
 
 
 @schedule_router.get("", response_model=list[ScheduleRuleOut])
 async def list_rules(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ScheduleRule).order_by(ScheduleRule.hour, ScheduleRule.minute))).scalars().all()
-    return [_rule_out(r) for r in rows]
+    pins = await _pin_map(db, list(rows))
+    return [_rule_out(r, pins) for r in rows]
 
 
 @schedule_router.post("", response_model=ScheduleRuleOut, status_code=201)
@@ -37,11 +91,13 @@ async def create_rule(body: ScheduleRuleIn, _: str = Depends(get_current_admin),
         raise HTTPException(404, "Account not found")
     if body.caption_template_id is not None and await db.get(CaptionTemplate, body.caption_template_id) is None:
         raise HTTPException(404, "Caption template not found")
+    if body.pinned_video_id is not None:
+        await _validate_pin(db, body.pinned_video_id)
     r = ScheduleRule(**body.model_dump())
     db.add(r)
     await db.commit()
     await db.refresh(r)
-    return _rule_out(r)
+    return _rule_out(r, await _pin_map(db, [r]))
 
 
 @schedule_router.put("/{rule_id}", response_model=ScheduleRuleOut)
@@ -55,11 +111,13 @@ async def update_rule(rule_id: int, body: ScheduleRuleIn, _: str = Depends(get_c
         raise HTTPException(404, "Account not found")
     if body.caption_template_id is not None and await db.get(CaptionTemplate, body.caption_template_id) is None:
         raise HTTPException(404, "Caption template not found")
+    if body.pinned_video_id is not None:
+        await _validate_pin(db, body.pinned_video_id, exclude_rule_id=rule_id)
     for k, v in body.model_dump().items():
         setattr(r, k, v)
     await db.commit()
     await db.refresh(r)
-    return _rule_out(r)
+    return _rule_out(r, await _pin_map(db, [r]))
 
 
 @schedule_router.delete("/{rule_id}", status_code=204)
@@ -80,6 +138,35 @@ async def toggle_rule(rule_id: int, _: str = Depends(get_current_admin), db: Asy
     r.is_active = not r.is_active
     await db.commit()
     return {"is_active": r.is_active}
+
+
+@schedule_router.post("/{rule_id}/pin", response_model=ScheduleRuleOut)
+async def pin_rule(rule_id: int, body: dict, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Pin a processed video to a rule (re-arms retired rules too)."""
+    r = await db.get(ScheduleRule, rule_id)
+    if not r:
+        raise HTTPException(404, "Rule not found")
+    video_id = body.get("video_id")
+    if not isinstance(video_id, int):
+        raise HTTPException(422, "video_id is required")
+    await _validate_pin(db, video_id, exclude_rule_id=rule_id)
+    r.pinned_video_id = video_id
+    r.is_active = True
+    await db.commit()
+    await db.refresh(r)
+    return _rule_out(r, await _pin_map(db, [r]))
+
+
+@schedule_router.post("/{rule_id}/unpin", response_model=ScheduleRuleOut)
+async def unpin_rule(rule_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Remove the pin — the rule falls back to queue mode."""
+    r = await db.get(ScheduleRule, rule_id)
+    if not r:
+        raise HTTPException(404, "Rule not found")
+    r.pinned_video_id = None
+    await db.commit()
+    await db.refresh(r)
+    return _rule_out(r)
 
 
 @schedule_router.get("/calendar/data")

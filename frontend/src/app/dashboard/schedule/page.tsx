@@ -1,9 +1,9 @@
 "use client";
 import { Fragment, useState } from "react";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
-import { useAccounts, useApiMutation, useCaptions, useEffects, useRules } from "@/hooks/use-api";
+import { useAccounts, useApiMutation, useCaptions, useEffects, useRules, useVideos } from "@/hooks/use-api";
 import { dayLabel } from "@/lib/utils";
-import type { Account, Caption, Effect, ScheduleRule } from "@/types/models";
+import type { Account, Caption, Effect, ScheduleRule, Video } from "@/types/models";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -12,10 +12,14 @@ export default function SchedulePage() {
   const { data: accounts } = useAccounts();
   const { data: captions } = useCaptions();
   const { data: effects } = useEffects();
+  const { data: processed } = useVideos("processed");
+  const readyVideos = ((processed ?? []) as Video[]).filter((v) => v.status === "processed");
+  const videoLabel = (v: Video) => `#${v.id} ${v.original_filename}${v.effect_preset ? ` (${v.effect_preset})` : ""}`;
   const create = useApiMutation("post", [["rules"]], "Rule added");
   const remove = useApiMutation("delete", [["rules"]], "Rule deleted");
   const toggle = useApiMutation("post", [["rules"]], "Rule updated");
-  const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "" });
+  const pin = useApiMutation("post", [["rules"]], "Pin updated");
+  const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", pinned_video_id: "" });
   const list = (rules ?? []) as ScheduleRule[];
 
   function submit() {
@@ -27,9 +31,23 @@ export default function SchedulePage() {
         account_id: form.account_id ? Number(form.account_id) : null,
         preferred_effect: form.preferred_effect || null,
         caption_template_id: form.caption_template_id ? Number(form.caption_template_id) : null,
+        pinned_video_id: form.pinned_video_id ? Number(form.pinned_video_id) : null,
       },
     });
-    setForm({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "" });
+    setForm({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", pinned_video_id: "" });
+  }
+
+  function ruleState(r: ScheduleRule) {
+    // One-shot lifecycle at a glance: pinned rules retire after firing.
+    if (r.pinned_video_id) {
+      if (!r.is_active && r.pinned_video_status === "posted") return { chip: "done ✓", tone: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" };
+      if (!r.is_active && !r.pinned_video_label) return { chip: "pin gone", tone: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" };
+      if (!r.is_active) return { chip: "paused (pinned)", tone: "bg-zinc-200 text-zinc-500" };
+      return { chip: `📌 ${r.pinned_video_label ?? `#${r.pinned_video_id}`} · one-shot`, tone: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" };
+    }
+    return r.is_active
+      ? { chip: "active · queue", tone: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" }
+      : { chip: "paused", tone: "bg-zinc-200 text-zinc-500" };
   }
 
   return (
@@ -81,9 +99,15 @@ export default function SchedulePage() {
             </select>
           </Field>
           <Field label="Effect">
-            <select className="input" value={form.preferred_effect} onChange={(e) => setForm({ ...form, preferred_effect: e.target.value })}>
+            <select className="input" value={form.preferred_effect} disabled={!!form.pinned_video_id} title={form.pinned_video_id ? "Ignored while a video is pinned" : ""} onChange={(e) => setForm({ ...form, preferred_effect: e.target.value })}>
               <option value="">Any</option>
               {((effects ?? []) as Effect[]).map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Pinned video (one-shot)">
+            <select className="input" value={form.pinned_video_id} onChange={(e) => setForm({ ...form, pinned_video_id: e.target.value, preferred_effect: e.target.value ? "" : form.preferred_effect })}>
+              <option value="">Auto (queue)</option>
+              {readyVideos.map((v) => <option key={v.id} value={v.id}>{videoLabel(v)}</option>)}
             </select>
           </Field>
           <Field label="Caption template">
@@ -98,19 +122,45 @@ export default function SchedulePage() {
 
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : list.length === 0 ? <EmptyState title="No schedule rules" /> : (
         <Card>
-          {list.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
-              <strong>{r.name}</strong>
-              <span className="text-zinc-500">{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.is_active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-zinc-200 text-zinc-500"}`}>
-                {r.is_active ? "active" : "paused"}
-              </span>
-              <span className="ml-auto flex gap-2">
-                <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggle.isPending} onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>{toggle.isPending ? "Saving…" : "Toggle"}</button>
-                <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
-              </span>
+          {list.map((r) => {
+            const st = ruleState(r);
+            return (
+            <div key={r.id} className="border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
+              <div className="flex flex-wrap items-center gap-2">
+                <strong>{r.name}</strong>
+                <span className="text-zinc-500">{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.tone}`}>
+                  {st.chip}
+                </span>
+                <span className="ml-auto flex gap-2">
+                  <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggle.isPending} onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>{toggle.isPending ? "Saving…" : "Toggle"}</button>
+                  <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <label>📌 Video:
+                  <select
+                    className="input ml-1 !w-auto !py-1 text-xs"
+                    value={r.pinned_video_id ?? ""}
+                    disabled={pin.isPending}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) pin.mutate({ url: `/schedule/${r.id}/pin`, body: { video_id: Number(v) } });
+                      else pin.mutate({ url: `/schedule/${r.id}/unpin` });
+                    }}
+                  >
+                    <option value="">Auto (queue)</option>
+                    {readyVideos.map((v) => <option key={v.id} value={v.id}>{videoLabel(v)}</option>)}
+                    {r.pinned_video_id && !readyVideos.some((v) => v.id === r.pinned_video_id) && (
+                      <option value={r.pinned_video_id}>{r.pinned_video_label ?? `#${r.pinned_video_id}`} ({r.pinned_video_status ?? "gone"})</option>
+                    )}
+                  </select>
+                </label>
+                {r.pinned_video_id && r.is_active && <span>Pinned rules fire once, then retire. Effect filter is ignored while pinned.</span>}
+              </div>
             </div>
-          ))}
+            );
+          })}
         </Card>
       )}
     </div>

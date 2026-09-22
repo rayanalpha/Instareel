@@ -357,6 +357,93 @@ class TestPostClaim:
         assert video_already_queued(s, vid2, window_min=180) is True
 
 
+class TestResolveRuleVideo:
+    """Hybrid scheduling decisions: pinned one-shots vs queue mode."""
+
+    _seq = 0
+
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        import app.models  # noqa: F401 — register every table before create_all
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def _video(self, s, status="processed"):
+        import datetime as dt
+
+        from app.models import Video, VideoStatus
+
+        TestResolveRuleVideo._seq += 1
+        tag = TestResolveRuleVideo._seq
+        v = Video(original_filename=f"v{tag}.mp4", raw_path=f"/tmp/v{tag}.mp4",
+                  md5_hash=f"rv{tag}", status=VideoStatus[status])
+        s.add(v)
+        s.commit()
+        return v
+
+    def _rule(self, s, **kw):
+        from app.models import ScheduleRule
+
+        r = ScheduleRule(name="t", hour=10, **kw)
+        s.add(r)
+        s.commit()
+        return r
+
+    def test_queue_modes(self):
+        from app.tasks.sync_helpers import resolve_rule_video
+
+        s = self._session()
+        r = self._rule(s)
+        assert resolve_rule_video(s, r, set()) == (None, "empty")
+        v1 = self._video(s)
+        self._video(s)
+        v, d = resolve_rule_video(s, r, set())
+        assert d == "fire" and v is not None and v.id == v1.id  # oldest first
+        # Queue mode has no fall-through: oldest taken → nothing left.
+        assert resolve_rule_video(s, r, {v1.id}) == (None, "empty")
+
+    def test_pinned_dispositions(self):
+        import datetime as dt
+
+        from app.models import Account, Post, PostStatus
+        from app.tasks.sync_helpers import resolve_rule_video
+
+        s = self._session()
+        # Gone pin.
+        r = self._rule(s, pinned_video_id=999999)
+        assert resolve_rule_video(s, r, set()) == (None, "retire_gone")
+        # Waiting pins.
+        for st in ("uploaded", "processing", "failed"):
+            v = self._video(s, status=st)
+            r.pinned_video_id = v.id
+            assert resolve_rule_video(s, r, set()) == (None, "wait"), st
+        # Posted pin retires.
+        vp = self._video(s, status="posted")
+        r.pinned_video_id = vp.id
+        assert resolve_rule_video(s, r, set()) == (None, "retire_posted")
+        # Queued pin waits.
+        vq = self._video(s)
+        acc = Account(username="rvq", password_enc="x")
+        s.add(acc)
+        s.flush()
+        s.add(Post(video_id=vq.id, account_id=acc.id, status=PostStatus.scheduled,
+                   scheduled_for=dt.datetime.now(dt.timezone.utc)))
+        s.commit()
+        r.pinned_video_id = vq.id
+        assert resolve_rule_video(s, r, set()) == (None, "wait")
+        # Clean pin fires.
+        vf = self._video(s)
+        r.pinned_video_id = vf.id
+        v, d = resolve_rule_video(s, r, set())
+        assert d == "fire" and v is not None and v.id == vf.id
+        assert resolve_rule_video(s, r, {vf.id}) == (None, "wait")
+
+
 class TestSiblingGuard:
     def _session(self):
         from sqlalchemy import create_engine
