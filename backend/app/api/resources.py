@@ -13,7 +13,7 @@ from app.core.security import decrypt_secret, encrypt_secret
 from app.models import Account, AudioTrack, BioConfig, EffectPreset, Proxy, ProxyProtocol, ProxySource
 from app.schemas.account import ProxyCreate, ProxyOut, ProxyUpdate
 from app.schemas.content import (
-    AudioIn, AudioOut, BioIn, BioOut, EffectIn, EffectOut, ProxySourceIn, ProxySourceOut,
+    AudioIn, AudioOut, BioApplyIn, BioIn, BioOut, EffectIn, EffectOut, ProxySourceIn, ProxySourceOut,
 )
 from app.services.log_service import log_event
 
@@ -42,7 +42,6 @@ def _bio_out(b: BioConfig) -> BioOut:
     return BioOut(
         id=b.id, account_id=b.account_id, text=b.text, link_url=b.link_url,
         full_name=b.full_name or "", make_private=b.make_private,
-        is_active=b.is_active, rotation_interval_days=b.rotation_interval_days,
         profile_pic_path=b.profile_pic_path,
         has_picture=bool(b.profile_pic_path and _os.path.exists(b.profile_pic_path)),
         last_applied=b.last_applied,
@@ -67,6 +66,24 @@ async def create_bio(body: BioIn, _: str = Depends(get_current_admin), db: Async
     return _bio_out(b)
 
 
+@bio_router.post("/ensure", response_model=BioOut)
+async def ensure_bio(body: dict, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Get-or-create the single profile config for an account.
+
+    No rotation anymore: one account = one config, every section optional
+    and applied independently."""
+    acc = await db.get(Account, body.get("account_id"))
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    row = (await db.execute(select(BioConfig).where(BioConfig.account_id == acc.id))).scalars().first()
+    if row is None:
+        row = BioConfig(account_id=acc.id, text="")
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    return _bio_out(row)
+
+
 @bio_router.put("/{bid}", response_model=BioOut)
 async def update_bio(bid: int, body: BioIn, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     b = await db.get(BioConfig, bid)
@@ -74,7 +91,9 @@ async def update_bio(bid: int, body: BioIn, _: str = Depends(get_current_admin),
         raise HTTPException(404, "Bio not found")
     if await db.get(Account, body.account_id) is None:
         raise HTTPException(404, "Account not found")
-    for k, v in body.model_dump().items():
+    # Partial update: only explicitly sent fields are touched, so saving one
+    # section never wipes the others.
+    for k, v in body.model_dump(exclude_unset=True).items():
         setattr(b, k, v)
     await db.commit()
     await db.refresh(b)
@@ -94,10 +113,12 @@ async def delete_bio(bid: int, _: str = Depends(get_current_admin), db: AsyncSes
 @bio_router.post("/{bid}/apply")
 @limiter.limit("10/minute")
 async def apply_bio(
-    request: Request, bid: int, _: str = Depends(get_current_admin),
-    db: AsyncSession = Depends(get_db),
+    request: Request, bid: int, body: BioApplyIn | None = None,
+    _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db),
 ):
-    """Apply the full profile now: bio + link + full name + picture + privacy."""
+    """Apply profile sections now. Each section is independent: pass
+    {"fields": ["bio"]} to touch only the bio, etc. (bio, link, full_name,
+    picture, privacy). Omitted/empty = apply every non-empty section."""
     import concurrent.futures
 
     from app.config import settings
@@ -114,13 +135,20 @@ async def apply_bio(
         raise HTTPException(404, "Account not found")
     if not sched.account_reachable(db, acc):
         raise HTTPException(409, "No healthy proxy route for this account right now")
+    fields = set((body.fields if body and body.fields else []))
+    unknown = fields - {"bio", "link", "full_name", "picture", "privacy"}
+    if unknown:
+        raise HTTPException(422, f"Unknown section(s): {sorted(unknown)}")
+    want_all = not fields
     username, password = acc.username, decrypt_secret(acc.password_enc)
     purl = sched.resolve_proxy_url(db, acc)
-    bio_text: str = b.text
-    link: str = b.link_url or ""
-    full_name: str = b.full_name or ""
-    make_private: bool | None = b.make_private
-    picture: str | None = b.profile_pic_path
+    bio_text: str = b.text if (want_all or "bio" in fields) else ""
+    link: str = (b.link_url or "") if (want_all or "link" in fields) else ""
+    full_name: str = (b.full_name or "") if (want_all or "full_name" in fields) else ""
+    make_private: bool | None = b.make_private if (want_all or "privacy" in fields) else None
+    picture: str | None = b.profile_pic_path if (want_all or "picture" in fields) else None
+    if not want_all and not (bio_text or link or full_name or picture or make_private is not None):
+        raise HTTPException(422, "Selected section is empty — nothing to apply")
     acc_id = acc.id
     svc = InstagramService(proxy_url=purl, session_path=session_path_for(username, settings.MEDIA_ROOT))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -154,7 +182,7 @@ async def upload_bio_picture(
 ):
     """Upload the profile picture for a bio config (validated image, ≤10MB).
 
-    Stored under media/profile_pics/ and applied on next rotation/Apply.
+    Stored under media/profile_pics/ and published with Apply picture.
     """
     from app.config import settings
     from app.services.video_processor import media_dirs

@@ -17,7 +17,7 @@ const NAV = [
   { href: "/dashboard/posts", label: "Posts", icon: History },
   { href: "/dashboard/schedule", label: "Schedule", icon: CalendarClock },
   { href: "/dashboard/captions", label: "Captions", icon: Captions },
-  { href: "/dashboard/bios", label: "Bios", icon: FileText },
+  { href: "/dashboard/bios", label: "Profile", icon: FileText },
   { href: "/dashboard/proxies", label: "Proxies", icon: Users },
   { href: "/dashboard/effects", label: "Effects", icon: SlidersHorizontal },
   { href: "/dashboard/audio", label: "Audio", icon: Music },

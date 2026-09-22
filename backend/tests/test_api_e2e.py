@@ -337,6 +337,22 @@ class TestResources:
         assert h.status_code == 200 and h.json() == []
         assert c.delete(f"/api/v1/bios/{bid}").status_code == 204
 
+    def test_bio_ensure_and_section_apply_validation(self, client):
+        c, _, _ = client
+        acc = c.post("/api/v1/accounts", json={"username": "s1", "password": "pw"}).json()["id"]
+        assert c.post("/api/v1/bios/ensure", json={"account_id": 999}).status_code == 404
+        b1 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
+        assert b1["text"] == "" and b1["account_id"] == acc
+        b2 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
+        assert b2["id"] == b1["id"]  # idempotent: one config per account
+        # Partial PUT keeps the other sections intact.
+        c.put(f"/api/v1/bios/{b1['id']}", json={"account_id": acc, "text": "hello"})
+        row = c.get("/api/v1/bios").json()[0]
+        assert (row["text"], row["link_url"]) == ("hello", "")
+        # Section validation happens before anything touches Instagram.
+        assert c.post(f"/api/v1/bios/{b1['id']}/apply", json={"fields": ["nope"]}).status_code == 422
+        assert c.post(f"/api/v1/bios/{b1['id']}/apply", json={"fields": ["link"]}).status_code == 422
+
     def test_bio_link_guard(self, client):
         c, _, _ = client
         acc = c.post("/api/v1/accounts", json={"username": "b2", "password": "pw"}).json()["id"]

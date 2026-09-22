@@ -49,11 +49,9 @@ class BioConfig(Base, TimestampMixin):
     __tablename__ = "bio_configs"
 
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     link_url: Mapped[str] = mapped_column(String(512), default="")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_applied: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    rotation_interval_days: Mapped[int] = mapped_column(Integer, default=14)
     # Extended profile customization (all optional — empty/None = don't touch):
     full_name: Mapped[str] = mapped_column(String(128), default="")
     profile_pic_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)

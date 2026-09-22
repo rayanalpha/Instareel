@@ -46,7 +46,8 @@ class HashtagSetOut(HashtagSetIn):
 
 class BioIn(BaseModel):
     account_id: int
-    text: str = Field(min_length=1)
+    # Every section is optional and independent — empty = don't touch on IG.
+    text: str = ""
     link_url: str = ""
     full_name: str = Field(default="", max_length=128)
 
@@ -62,8 +63,12 @@ class BioIn(BaseModel):
             raise ValueError("link_url must be an http(s) URL")
         return s
     make_private: bool | None = None
-    is_active: bool = True
-    rotation_interval_days: int = Field(default=14, ge=1, le=365)
+
+
+class BioApplyIn(BaseModel):
+    """Sections to apply: any of bio, link, full_name, picture, privacy.
+    Omitted/empty = apply every non-empty section (legacy full apply)."""
+    fields: list[str] | None = None
 
 
 class BioOut(BioIn):

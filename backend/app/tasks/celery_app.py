@@ -21,7 +21,6 @@ celery.autodiscover_tasks(["app.tasks"])
 celery.conf.beat_schedule = {
     "check-scheduled-posts": {"task": "tasks.post_tasks.check_and_post", "schedule": crontab(minute="*")},
     "fetch-analytics": {"task": "tasks.analytics_tasks.fetch_all_analytics", "schedule": crontab(hour="*/4")},
-    "check-bio-rotation": {"task": "tasks.bio_tasks.check_bio_rotation", "schedule": crontab(hour=6, minute=0)},
     "proxy-health-check": {"task": "tasks.proxy_tasks.check_all_proxies", "schedule": crontab(minute="*/30")},
     "proxy-pool-refresh": {"task": "tasks.proxy_tasks.refresh_proxy_pool", "schedule": crontab(hour="*/3", minute=17)},
     "media-cleanup": {"task": "tasks.cleanup_tasks.clean_old_media", "schedule": crontab(hour=4, minute=0)},

@@ -29,7 +29,7 @@ export interface ScheduleRule {
 
 export interface Caption { id: number; name: string; content: string; category: string | null; is_active: boolean; use_count: number; avg_engagement: number | null; }
 export interface HashtagSet { id: number; name: string; tags: string; is_active: boolean; use_count: number; }
-export interface Bio { id: number; account_id: number; text: string; link_url: string; full_name: string; make_private: boolean | null; is_active: boolean; rotation_interval_days: number; profile_pic_path: string | null; has_picture: boolean; last_applied: string | null; }
+export interface Bio { id: number; account_id: number; text: string; link_url: string; full_name: string; make_private: boolean | null; profile_pic_path: string | null; has_picture: boolean; last_applied: string | null; }
 export interface IgProfile { username: string; full_name: string; biography: string; external_url: string; is_private: boolean; profile_pic_url: string; follower_count: number | null; following_count: number | null; media_count: number | null; }
 export interface Proxy { id: number; url: string; protocol: string; username: string | null; country: string | null; is_healthy: boolean; last_checked: string | null; fail_count: number; latency_ms: number | null; last_error: string | null; source: string | null; is_active: boolean; }
 export interface ProxyImportResult { added: number; duplicates_skipped: number; errors: { line: number; text: string; reason: string }[]; }

@@ -123,7 +123,7 @@ export default function PhonePage() {
           )}
           <div className="mt-3 border-t border-zinc-100 pt-2 text-xs text-zinc-500 dark:border-zinc-800">
             <p>Account: {current.posts_today}/{current.max_daily_posts} posts today · {current.status}</p>
-            <p>Bio config: {bio ? `every ${bio.rotation_interval_days}d` : "none — create one in Bios"}</p>
+            <p>Bio config: {bio ? "set — edit it in Profile editor" : "none — create one in Profile editor"}</p>
           </div>
         </Card>
       </div>

@@ -80,7 +80,7 @@ WARMUP_MAX_POSTS = 1
 MAX_PROXY_FAILS = 5
 #: Cooldown given to accounts whose proxy was just auto-disabled.
 PROXY_FAIL_COOLDOWN_HOURS = 6
-#: Bio rotation skips accounts younger than this (fresh accounts changing bio = flag).
+#: (Legacy rotation guard, kept for reference.) Fresh accounts changing bio = flag.
 BIO_MIN_AGE_DAYS = 14
 #: Analytics skips accounts younger than this (saves logins on day-0 accounts).
 ANALYTICS_MIN_AGE_DAYS = 3
