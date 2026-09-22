@@ -60,13 +60,13 @@ export default function AccountDetailPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-extrabold tracking-tight">@{acc.username}</h1>
-        <StatusBadge status={acc.status} />
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <h1 title={acc.username} className="min-w-0 flex-1 truncate break-all text-xl font-extrabold tracking-tight">@{acc.username}</h1>
+        <span className="shrink-0"><StatusBadge status={acc.status} /></span>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         {[["Posts", stats?.posts], ["Views", fmt(stats?.views)], ["Likes", fmt(stats?.likes)], ["Engagement", `${stats?.avg_engagement ?? 0}%`]].map(([k, v]) => (
-          <Card key={k as string}><p className="text-2xl font-extrabold">{v as string}</p><p className="text-xs text-zinc-500">{k}</p></Card>
+          <Card key={k as string} className="overflow-hidden"><p title={String(v ?? "")} className="truncate text-2xl font-extrabold">{v as string}</p><p className="text-xs text-zinc-500">{k}</p></Card>
         ))}
       </div>
       <Card>
@@ -86,15 +86,19 @@ export default function AccountDetailPage() {
               }}
             >
               <option value="">No proxy</option>
-              {proxies.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.protocol}://{proxyHost(p.url)}{p.country ? ` (${p.country})` : ""}
-                </option>
-              ))}
+              {proxies.map((p) => {
+                const host = proxyHost(p.url);
+                const short = host.length > 26 ? `${host.slice(0, 25)}…` : host;
+                return (
+                  <option key={p.id} value={p.id}>
+                    {p.protocol}://{short}{p.country ? ` (${p.country})` : ""}
+                  </option>
+                );
+              })}
             </select>
           </Field>
           <Field label="Session file">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className={`text-sm font-semibold ${acc.has_session ? "text-emerald-500" : "text-amber-500"}`}>
                 {acc.has_session ? "saved ✓" : "missing"}
               </span>

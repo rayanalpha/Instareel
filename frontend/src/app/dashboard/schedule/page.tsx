@@ -14,7 +14,11 @@ export default function SchedulePage() {
   const { data: effects } = useEffects();
   const { data: processed } = useVideos("processed");
   const readyVideos = ((processed ?? []) as Video[]).filter((v) => v.status === "processed");
-  const videoLabel = (v: Video) => `#${v.id} ${v.original_filename}${v.effect_preset ? ` (${v.effect_preset})` : ""}`;
+  const videoLabel = (v: Video) => {
+    // <option> text can't wrap or truncate via CSS — shorten in JS.
+    const base = `#${v.id} ${v.original_filename}${v.effect_preset ? ` (${v.effect_preset})` : ""}`;
+    return base.length > 42 ? `${base.slice(0, 41)}…` : base;
+  };
   const create = useApiMutation("post", [["rules"]], "Rule added");
   const remove = useApiMutation("delete", [["rules"]], "Rule deleted");
   const toggle = useApiMutation("post", [["rules"]], "Rule updated");
@@ -93,25 +97,25 @@ export default function SchedulePage() {
           <Field label="Hour"><input className="input" type="number" min={0} max={23} value={form.hour} onChange={(e) => setForm({ ...form, hour: Number(e.target.value) })} /></Field>
           <Field label="Minute"><input className="input" type="number" min={0} max={59} value={form.minute} onChange={(e) => setForm({ ...form, minute: Number(e.target.value) })} /></Field>
           <Field label="Account">
-            <select className="input" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+            <select className="input max-w-full" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
               <option value="">Auto-select</option>
               {((accounts ?? []) as Account[]).map((a) => <option key={a.id} value={a.id}>@{a.username}</option>)}
             </select>
           </Field>
           <Field label="Effect">
-            <select className="input" value={form.preferred_effect} disabled={!!form.pinned_video_id} title={form.pinned_video_id ? "Ignored while a video is pinned" : ""} onChange={(e) => setForm({ ...form, preferred_effect: e.target.value })}>
+            <select className="input max-w-full" value={form.preferred_effect} disabled={!!form.pinned_video_id} title={form.pinned_video_id ? "Ignored while a video is pinned" : ""} onChange={(e) => setForm({ ...form, preferred_effect: e.target.value })}>
               <option value="">Any</option>
               {((effects ?? []) as Effect[]).map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
             </select>
           </Field>
           <Field label="Pinned video (one-shot)">
-            <select className="input" value={form.pinned_video_id} onChange={(e) => setForm({ ...form, pinned_video_id: e.target.value, preferred_effect: e.target.value ? "" : form.preferred_effect })}>
+            <select className="input max-w-full" value={form.pinned_video_id} onChange={(e) => setForm({ ...form, pinned_video_id: e.target.value, preferred_effect: e.target.value ? "" : form.preferred_effect })}>
               <option value="">Auto (queue)</option>
               {readyVideos.map((v) => <option key={v.id} value={v.id}>{videoLabel(v)}</option>)}
             </select>
           </Field>
           <Field label="Caption template">
-            <select className="input" value={form.caption_template_id} onChange={(e) => setForm({ ...form, caption_template_id: e.target.value })}>
+            <select className="input max-w-full" value={form.caption_template_id} onChange={(e) => setForm({ ...form, caption_template_id: e.target.value })}>
               <option value="">Random</option>
               {((captions ?? []) as Caption[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -126,21 +130,21 @@ export default function SchedulePage() {
             const st = ruleState(r);
             return (
             <div key={r.id} className="border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
-              <div className="flex flex-wrap items-center gap-2">
-                <strong>{r.name}</strong>
-                <span className="text-zinc-500">{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.tone}`}>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <strong title={r.name} className="min-w-0 flex-1 break-words">{r.name}</strong>
+                <span className="shrink-0 text-zinc-500">{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}</span>
+                <span title={r.pinned_video_label ?? st.chip} className={`min-w-0 max-w-full truncate rounded-full px-2 py-0.5 text-xs font-semibold ${st.tone}`}>
                   {st.chip}
                 </span>
-                <span className="ml-auto flex gap-2">
+                <span className="ml-auto flex shrink-0 flex-wrap gap-2">
                   <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggle.isPending} onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>{toggle.isPending ? "Saving…" : "Toggle"}</button>
                   <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
                 </span>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                <label>📌 Video:
+                <label className="flex min-w-0 items-center">📌 Video:
                   <select
-                    className="input ml-1 !w-auto !py-1 text-xs"
+                    className="input ml-1 !w-auto min-w-0 max-w-full !py-1 text-xs"
                     value={r.pinned_video_id ?? ""}
                     disabled={pin.isPending}
                     onChange={(e) => {

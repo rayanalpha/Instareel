@@ -132,44 +132,44 @@ export function PhoneProfile({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex items-center justify-center gap-1 border-b border-zinc-200 py-2 text-sm font-bold dark:border-zinc-800">
-        @{account.username}
-        {live?.is_private ? <span title="Private">🔒</span> : null}
+    <div className="flex h-full min-w-0 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="flex min-w-0 items-center justify-center gap-1 border-b border-zinc-200 py-2 text-sm font-bold dark:border-zinc-800">
+        <span title={account.username} className="min-w-0 max-w-full truncate px-2">@{account.username}</span>
+        {live?.is_private ? <span title="Private" className="shrink-0">🔒</span> : null}
       </div>
-      <div className="flex items-center gap-4 px-4 pt-3">
-        <Avatar url={live?.profile_pic_url ?? null} username={account.username} size="h-16 w-16" />
-        <div className="flex flex-1 justify-around text-center">
-          <div>
-            <p className="font-bold">{postCount}</p>
+      <div className="flex min-w-0 items-center gap-4 px-4 pt-3">
+        <Avatar url={live?.profile_pic_url ?? null} username={account.username} size="h-16 w-16 shrink-0" />
+        <div className="flex min-w-0 flex-1 justify-around text-center">
+          <div className="min-w-0">
+            <p className="truncate font-bold">{postCount}</p>
             <p className="text-xs text-zinc-500">posts</p>
           </div>
-          <div>
-            <p className="font-bold">{followers ?? "—"}</p>
+          <div className="min-w-0">
+            <p className="truncate font-bold">{followers ?? "—"}</p>
             <p className="text-xs text-zinc-500">followers</p>
           </div>
-          <div>
-            <p className="font-bold">{following ?? "—"}</p>
+          <div className="min-w-0">
+            <p className="truncate font-bold">{following ?? "—"}</p>
             <p className="text-xs text-zinc-500">following</p>
           </div>
         </div>
       </div>
-      <div className="px-4 pb-2 pt-1 text-[13px]">
-        <p className="font-semibold">{displayName}</p>
-        {biography && <p className="whitespace-pre-wrap">{biography}</p>}
+      <div className="min-w-0 px-4 pb-2 pt-1 text-[13px]">
+        <p className="break-words font-semibold">{displayName}</p>
+        {biography && <p className="whitespace-pre-wrap break-words">{biography}</p>}
         {link && (/^https?:\/\//i.test(link) ? (
-          <a href={link} target="_blank" rel="noreferrer" className="text-sky-600 dark:text-sky-400">
+          <a href={link} target="_blank" rel="noreferrer" title={link} className="block truncate text-sky-600 dark:text-sky-400">
             {link}
           </a>
         ) : (
-          <span className="text-zinc-500">{link}</span>
+          <span className="block truncate text-zinc-500" title={link}>{link}</span>
         ))}
         {bio === null && <p className="text-zinc-500">No profile config — create one in Profile.</p>}
         {!usingLive && bio !== null && !liveFailed && (
           <p className="text-xs text-amber-600">Loading live profile… showing nothing until Instagram answers.</p>
         )}
         {!usingLive && bio !== null && (
-          <p className="text-xs text-amber-600">
+          <p className="break-words text-xs text-amber-600">
             Draft on file{bio.text ? `: “${bio.text.slice(0, 80)}${bio.text.length > 80 ? "…" : ""}”` : ""} — not on Instagram until you Apply it.
           </p>
         )}

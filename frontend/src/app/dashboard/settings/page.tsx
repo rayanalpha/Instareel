@@ -30,11 +30,11 @@ export default function SettingsPage() {
               }}
             >
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-xs font-semibold">{s.key}</p>
-                <p className="truncate text-xs text-zinc-500">{s.is_sensitive ? "(sensitive â€” masked)" : s.value || "(empty)"}</p>
+                <p title={s.key} className="break-all font-mono text-xs font-semibold">{s.key}</p>
+                <p title={s.is_sensitive ? undefined : (s.value || undefined)} className="truncate text-xs text-zinc-500">{s.is_sensitive ? "(sensitive — masked)" : s.value || "(empty)"}</p>
               </div>
-              <input name="value" className="input min-w-[140px] flex-1 sm:flex-none sm:!w-48" placeholder="new value" />
-              <button className="btn-ghost !px-3 !py-1.5 text-xs" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
+              <input name="value" className="input min-w-[140px] max-w-full flex-1 sm:flex-none sm:!w-48" placeholder="new value" />
+              <button className="btn-ghost shrink-0 !px-3 !py-1.5 text-xs" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
             </form>
           ))}
         </Card>

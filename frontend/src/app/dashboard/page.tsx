@@ -9,12 +9,12 @@ import type { Account, Overview, Post } from "@/types/models";
 
 function Kpi({ icon: Icon, label, value, sub }: { icon: typeof Eye; label: string; value: string; sub?: string }) {
   return (
-    <Card>
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg bg-emerald-600/10 p-2.5"><Icon className="h-5 w-5 text-emerald-500" /></div>
-        <div>
-          <p className="text-2xl font-extrabold tracking-tight">{value}</p>
-          <p className="text-xs font-medium text-zinc-500">{label}{sub ? ` · ${sub}` : ""}</p>
+    <Card className="overflow-hidden">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="shrink-0 rounded-lg bg-emerald-600/10 p-2.5"><Icon className="h-5 w-5 text-emerald-500" /></div>
+        <div className="min-w-0 flex-1">
+          <p title={value} className="truncate text-2xl font-extrabold tracking-tight">{value}</p>
+          <p className="truncate text-xs font-medium text-zinc-500" title={sub ? `${label} · ${sub}` : label}>{label}{sub ? ` · ${sub}` : ""}</p>
         </div>
       </div>
     </Card>
@@ -74,7 +74,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <CardTitle>Recent posts</CardTitle>
             <Link href="/dashboard/posts" className="text-xs font-semibold text-emerald-500 hover:underline">View all</Link>
           </div>
@@ -113,10 +113,10 @@ export default function DashboardPage() {
             <CardTitle>Account health</CardTitle>
             <div className="space-y-2">
               {((accounts ?? []) as Account[]).map((a) => (
-                <div key={a.id} className="flex items-center gap-2 text-sm">
-                  <span className={`h-2 w-2 rounded-full ${a.status === "active" ? "bg-emerald-500" : a.status === "cooldown" ? "bg-amber-500" : "bg-red-500"}`} />
-                  <span className="font-medium">@{a.username}</span>
-                  <span className="ml-auto text-xs text-zinc-500">{a.posts_today}/{a.max_daily_posts} today</span>
+                <div key={a.id} className="flex min-w-0 items-center gap-2 text-sm">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${a.status === "active" ? "bg-emerald-500" : a.status === "cooldown" ? "bg-amber-500" : "bg-red-500"}`} />
+                  <span title={a.username} className="min-w-0 flex-1 truncate font-medium">@{a.username}</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-zinc-500">{a.posts_today}/{a.max_daily_posts} today</span>
                 </div>
               ))}
               {(accounts ?? []).length === 0 && <p className="text-sm text-zinc-500">No accounts yet. <Link href="/dashboard/accounts" className="text-emerald-500 hover:underline">Add one</Link>.</p>}
@@ -124,9 +124,9 @@ export default function DashboardPage() {
           </Card>
           <Card>
             <CardTitle>Processing queue</CardTitle>
-            <div className="flex items-center gap-2 text-sm">
-              <Radio className="h-4 w-4 text-emerald-500" />
-              <span><strong>{ov.queue_size}</strong> videos waiting · <strong>{ov.scheduled_count}</strong> posts scheduled</span>
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <Radio className="h-4 w-4 shrink-0 text-emerald-500" />
+              <span className="min-w-0 flex-1 break-words"><strong>{ov.queue_size}</strong> videos waiting · <strong>{ov.scheduled_count}</strong> posts scheduled</span>
             </div>
             <Link href="/dashboard/videos/upload" className="btn-primary mt-3 w-full">Upload video</Link>
             {(queue ?? []).length > 0 && (

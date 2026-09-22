@@ -20,7 +20,7 @@ export default function VideosPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-extrabold tracking-tight">Videos</h1>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           <select className="input !w-auto" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>
             {["uploaded", "processing", "processed", "posting", "posted", "failed", "archived"].map((s) => (
@@ -37,10 +37,10 @@ export default function VideosPage() {
           {videos.map((v) => (
             <Card key={v.id}>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <Link href={`/dashboard/videos/${v.id}`} className="truncate font-semibold hover:text-emerald-500">
+                <Link href={`/dashboard/videos/${v.id}`} title={v.original_filename} className="min-w-0 flex-1 truncate font-semibold hover:text-emerald-500">
                   #{v.id} · {v.original_filename}
                 </Link>
-                <StatusBadge status={v.status} />
+                <span className="shrink-0"><StatusBadge status={v.status} /></span>
               </div>
               <p className="text-xs text-zinc-500">
                 {v.duration ? `${v.duration.toFixed(1)}s` : "—"} · {timeAgo(v.created_at)}
@@ -50,11 +50,11 @@ export default function VideosPage() {
                   ⚠ {v.failed_reason}
                 </p>
               )}
-              <div className="mt-3 flex gap-2">
-                <Link href={`/dashboard/videos/${v.id}`} className="btn-ghost flex-1 !py-1.5 text-xs">Detail</Link>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link href={`/dashboard/videos/${v.id}`} className="btn-ghost min-w-0 flex-1 !py-1.5 text-xs">Detail</Link>
                 {(v.status === "uploaded" || v.status === "failed") && (
                   <button
-                    className="btn-primary flex-1 !py-1.5 text-xs"
+                    className="btn-primary min-w-0 flex-1 !py-1.5 text-xs"
                     disabled={procBusyId === v.id}
                     onClick={async () => { setProcBusyId(v.id); try { await process.mutateAsync({ url: `/videos/${v.id}/process` }); } finally { setProcBusyId(null); } }}
                   >

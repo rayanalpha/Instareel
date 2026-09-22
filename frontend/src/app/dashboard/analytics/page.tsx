@@ -84,9 +84,9 @@ export default function AnalyticsPage() {
         {(accounts ?? []).length === 0
           ? <p className="text-sm text-zinc-500">No accounts yet.</p>
           : (accounts as { username: string; posts_today?: number; total_posts: number; total_views: number }[]).map((a: any) => (
-            <div key={a.username ?? a.id} className="flex items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
-              <strong>@{a.username}</strong>
-              <span className="ml-auto text-zinc-500">{a.total_posts ?? 0} posts · {fmt(a.total_views)} views</span>
+            <div key={a.username ?? a.id} className="flex min-w-0 items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
+              <strong title={a.username} className="min-w-0 flex-1 truncate">@{a.username}</strong>
+              <span className="shrink-0 whitespace-nowrap text-zinc-500">{a.total_posts ?? 0} posts · {fmt(a.total_views)} views</span>
             </div>
           ))}
       </Card>

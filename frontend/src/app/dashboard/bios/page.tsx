@@ -178,13 +178,13 @@ export default function BiosPage() {
       </p>
       <Card>
         <Field label="Account">
-          <select className="input max-w-xs" value={accountId} onChange={(e) => selectAccount(e.target.value)}>
+          <select className="input w-full max-w-full" value={accountId} onChange={(e) => selectAccount(e.target.value)}>
             <option value="">Select…</option>
             {((accounts ?? []) as Account[]).map((a) => <option key={a.id} value={a.id}>@{a.username}</option>)}
           </select>
         </Field>
       </Card>
-      {opError && <p className="text-sm text-red-500">{opError}</p>}
+      {opError && <p className="break-words text-sm text-red-500">{opError}</p>}
       {loading ? <Spinner /> : bio ? (
         <>
           <p className="text-xs text-zinc-500">
@@ -195,11 +195,11 @@ export default function BiosPage() {
             </button>
           </p>
           {current ? (
-            <div className="rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800">
-              <p className="font-semibold">Live on Instagram @{current?.username} ({current?.follower_count ?? "—"} followers):</p>
-              <p>{current?.full_name} {current?.is_private ? "🔒" : ""}</p>
-              <p className="whitespace-pre-wrap">{current?.biography}</p>
-              {current?.external_url && <p>{current?.external_url}</p>}
+            <div className="min-w-0 rounded bg-zinc-100 p-2 text-xs dark:bg-zinc-800">
+              <p className="truncate font-semibold" title={current?.username}>Live on Instagram @{current?.username} ({current?.follower_count ?? "—"} followers):</p>
+              <p className="break-words">{current?.full_name} {current?.is_private ? "🔒" : ""}</p>
+              <p className="whitespace-pre-wrap break-words">{current?.biography}</p>
+              {current?.external_url && <p className="break-all">{current?.external_url}</p>}
             </div>
           ) : current === null ? (
             <p className="text-xs text-red-500">Could not read live profile (session/proxy issue).</p>

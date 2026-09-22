@@ -41,15 +41,15 @@ export default function CaptionsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               {((caps ?? []) as Caption[]).map((c) => (
                 <Card key={c.id}>
-                  <div className="flex items-center gap-2">
-                    <strong>{c.name}</strong>
-                    {c.category && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">{c.category}</span>}
-                    <span className="ml-auto text-xs text-zinc-500">used {c.use_count}× · {c.avg_engagement ?? 0}% eng.</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <strong title={c.name} className="min-w-0 flex-1 truncate">{c.name}</strong>
+                    {c.category && <span title={c.category} className="max-w-full shrink-0 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">{c.category}</span>}
+                    <span className="shrink-0 text-xs text-zinc-500">used {c.use_count}× · {c.avg_engagement ?? 0}% eng.</span>
                   </div>
-                  <div className="mt-2 rounded-lg bg-zinc-50 p-3 text-sm whitespace-pre-wrap dark:bg-zinc-800/60">{c.content}</div>
-                  <div className="mt-2 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
+                  <div className="mt-2 break-words rounded-lg bg-zinc-50 p-3 text-sm whitespace-pre-wrap dark:bg-zinc-800/60">{c.content}</div>
+                  <div className="mt-2 min-w-0 rounded-lg border border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-800">
                     <p className="font-semibold text-zinc-700 dark:text-zinc-300">Instagram preview</p>
-                    <p className="whitespace-pre-wrap"><strong>yourpage</strong> {c.content.slice(0, 140)}{c.content.length > 140 ? "…" : ""}</p>
+                    <p className="break-words whitespace-pre-wrap"><strong>yourpage</strong> {c.content.slice(0, 140)}{c.content.length > 140 ? "…" : ""}</p>
                   </div>
                   <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" disabled={delCap.isPending} onClick={() => { if (confirm(`Delete "${c.name}"?`)) delCap.mutate({ url: `/captions/${c.id}` }); }}>{delCap.isPending ? "Deleting…" : "Delete"}</button>
                 </Card>
@@ -73,8 +73,8 @@ export default function CaptionsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               {((tags ?? []) as HashtagSet[]).map((h) => (
                 <Card key={h.id}>
-                  <div className="flex items-center gap-2"><strong>{h.name}</strong><span className="ml-auto text-xs text-zinc-500">used {h.use_count}×</span></div>
-                  <p className="mt-2 text-sm text-sky-600 dark:text-sky-400">{h.tags}</p>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2"><strong title={h.name} className="min-w-0 flex-1 truncate">{h.name}</strong><span className="shrink-0 text-xs text-zinc-500">used {h.use_count}×</span></div>
+                  <p className="mt-2 break-all text-sm text-sky-600 dark:text-sky-400">{h.tags}</p>
                   <button className="btn-ghost mt-2 !py-1 text-xs text-red-500" disabled={delTag.isPending} onClick={() => { if (confirm(`Delete "${h.name}"?`)) delTag.mutate({ url: `/hashtags/${h.id}` }); }}>{delTag.isPending ? "Deleting…" : "Delete"}</button>
                 </Card>
               ))}

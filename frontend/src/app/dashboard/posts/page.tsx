@@ -27,10 +27,10 @@ export default function PostsPage() {
       <Card>
         <p className="mb-2 text-sm font-semibold">Up next ({((queue ?? []) as Post[]).length})</p>
         {((queue ?? []) as Post[]).slice(0, 5).map((p) => (
-          <div key={p.id} className="flex items-center gap-2 border-t border-zinc-100 py-1.5 text-sm first:border-0 dark:border-zinc-800">
-            <span>Post #{p.id}</span>
-            <span className="text-zinc-500">account #{p.account_id} · video #{p.video_id}</span>
-            <span className="ml-auto text-zinc-500">{p.scheduled_for ? timeAgo(p.scheduled_for) : "asap"}</span>
+          <div key={p.id} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-zinc-100 py-1.5 text-sm first:border-0 dark:border-zinc-800">
+            <span className="shrink-0">Post #{p.id}</span>
+            <span className="min-w-0 flex-1 truncate text-zinc-500">account #{p.account_id} · video #{p.video_id}</span>
+            <span className="shrink-0 whitespace-nowrap text-zinc-500">{p.scheduled_for ? timeAgo(p.scheduled_for) : "asap"}</span>
           </div>
         ))}
         {(queue ?? []).length === 0 && <p className="text-sm text-zinc-500">Nothing scheduled.</p>}
@@ -55,11 +55,11 @@ export default function PostsPage() {
                   <tr key={p.id} className="border-t border-zinc-100 dark:border-zinc-800">
                     <td className="py-2 pr-4">#{p.id} · acc #{p.account_id} · vid #{p.video_id}</td>
                     <td className="py-2 pr-4"><StatusBadge status={p.status} /></td>
-                    <td className="py-2 pr-4 text-zinc-500">{p.audio_track ?? "—"}{p.is_trial ? " · trial" : ""}</td>
+                    <td className="max-w-[160px] truncate py-2 pr-4 text-zinc-500" title={p.audio_track ?? ""}>{p.audio_track ?? "—"}{p.is_trial ? " · trial" : ""}</td>
                     <td className="py-2 pr-4 text-right">{fmt(p.views_7d ?? p.views_24h)}</td>
                     <td className="py-2 pr-4 text-right">{p.engagement_rate != null ? `${p.engagement_rate}%` : "—"}</td>
                     <td className="py-2 pr-4">{p.ig_permalink ? <a className="text-emerald-500 hover:underline" href={p.ig_permalink} target="_blank">Reel ↗</a> : "—"}</td>
-                    <td className="py-2 text-right">
+                    <td className="whitespace-nowrap py-2 text-right">
                       {p.status === "failed" && <button className="btn-ghost mr-2 !px-3 !py-1 text-xs" disabled={busyId === p.id} onClick={async () => { setBusyId(p.id); try { await retry.mutateAsync({ url: `/posts/${p.id}/retry` }); } finally { setBusyId(null); } }}>{busyId === p.id ? "Retrying…" : "Retry"}</button>}
                       <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={busyId === p.id} onClick={async () => { if (!confirm(`Delete post #${p.id}?`)) return; setBusyId(p.id); try { await remove.mutateAsync({ url: `/posts/${p.id}` }); } finally { setBusyId(null); } }}>{busyId === p.id ? "Deleting…" : "Delete"}</button>
                     </td>

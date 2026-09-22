@@ -73,14 +73,14 @@ export function Header() {
   return (
     <header className="flex h-16 items-center gap-3 border-b border-zinc-200 bg-white/80 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 md:hidden">
       <span className="font-extrabold">IG Funnel</span>
-      <div className="ml-auto flex items-center gap-2">
-        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="btn-ghost !px-2" aria-label="Toggle theme">
+      <div className="ml-auto flex min-w-0 items-center gap-2">
+        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="btn-ghost shrink-0 !px-2" aria-label="Toggle theme">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
-        <button onClick={logout} className="btn-ghost !px-2" aria-label="Log out">
+        <button onClick={logout} className="btn-ghost shrink-0 !px-2" aria-label="Log out">
           <LogOut className="h-4 w-4" />
         </button>
-        <span className="text-xs text-zinc-500">{username}</span>
+        <span className="max-w-[120px] truncate text-xs text-zinc-500" title={username ?? ""}>{username}</span>
       </div>
     </header>
   );
@@ -100,7 +100,7 @@ export function TopBar() {
         <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="btn-ghost !px-2" aria-label="Toggle theme">
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
-        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold dark:bg-zinc-800">{username ?? "admin"}</span>
+        <span className="max-w-[200px] truncate rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold dark:bg-zinc-800" title={username ?? "admin"}>{username ?? "admin"}</span>
       </div>
     </header>
   );

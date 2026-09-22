@@ -7,7 +7,7 @@ import { PhoneComposer } from "@/components/phone/composer";
 import { PhoneProfile } from "@/components/phone/profile";
 import { PhoneReels } from "@/components/phone/reels";
 import { PhoneTabs, type PhoneTab } from "@/components/phone/tabs";
-import { Card, CardTitle, EmptyState, Spinner } from "@/components/ui";
+import { Card, EmptyState, Spinner } from "@/components/ui";
 import { useAccounts, useAudios, useBios, useEffects, useLogs, usePosts, useVideos } from "@/hooks/use-api";
 import { usePhone } from "@/stores/stores";
 import { fmt, timeAgo } from "@/lib/utils";
@@ -95,15 +95,15 @@ export default function PhonePage() {
           </PhoneFrame>
         </div>
 
-        <Card className="w-full max-w-md">
-          <CardTitle>Inspector · @{current.username}</CardTitle>
+        <Card className="w-full max-w-md overflow-hidden">
+          <div className="mb-3 min-w-0 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100" title={current.username}>Inspector · @{current.username}</div>
           {selected ? (
             <div className="space-y-1 text-sm">
               <p><span className="text-zinc-500">Post</span> #{selected.id} · <span className="text-zinc-500">{selected.status}</span>{selected.is_trial ? " · trial" : ""}</p>
               {(selected.caption || selected.hashtags) && (
-                <p className="whitespace-pre-wrap">{[selected.caption, selected.hashtags].filter(Boolean).join(" ")}</p>
+                <p className="break-words whitespace-pre-wrap">{[selected.caption, selected.hashtags].filter(Boolean).join(" ")}</p>
               )}
-              <p><span className="text-zinc-500">Audio</span> {selected.audio_track ?? "—"}</p>
+              <p className="break-words"><span className="text-zinc-500">Audio</span> {selected.audio_track ?? "—"}</p>
               <p><span className="text-zinc-500">Effect</span> {selectedVideo?.effect_preset ?? "auto"}</p>
               <p>
                 <span className="text-zinc-500">Views</span> {fmt(selected.views_7d ?? selected.views_24h)}

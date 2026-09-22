@@ -108,7 +108,7 @@ export default function UploadPage() {
             onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); setFile(e.dataTransfer.files?.[0] ?? null); }}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") document.getElementById("video-file-input")?.click(); }}
-            className={`flex flex-col items-center gap-3 rounded-xl border-2 border-dashed p-10 text-center transition ${drag ? "border-emerald-500 bg-emerald-500/5" : "border-zinc-300 dark:border-zinc-700"}`}
+            className={`flex min-w-0 flex-col items-center gap-3 rounded-xl border-2 border-dashed p-6 text-center transition sm:p-10 ${drag ? "border-emerald-500 bg-emerald-500/5" : "border-zinc-300 dark:border-zinc-700"}`}
           >
             <UploadCloud className="h-10 w-10 text-zinc-400" />
             <p className="text-sm text-zinc-500">Drag & drop a video here, or</p>
@@ -119,7 +119,7 @@ export default function UploadPage() {
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
             </label>
-            {file && <p className="text-sm font-medium">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB</p>}
+            {file && <p title={file.name} className="max-w-full break-all text-sm font-medium">{file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB</p>}
           </div>
           <div className="mt-4 space-y-3">
             <Field label="Effect preset (live preview)">
@@ -147,8 +147,8 @@ export default function UploadPage() {
               Trial reel (non-followers first)
             </label>
             <Field label="Custom cover (optional — else auto frame at 25%)">
-              <div className="flex items-center gap-2">
-                {thumbUrl && <img src={thumbUrl} alt="cover" className="h-16 w-9 rounded object-cover" />}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {thumbUrl && <img src={thumbUrl} alt="cover" className="h-16 w-9 shrink-0 rounded object-cover" />}
                 <label className="btn-ghost cursor-pointer !py-1.5 text-xs">
                   {thumb ? "Change" : "Choose image"}
                   <input
@@ -160,7 +160,7 @@ export default function UploadPage() {
               </div>
             </Field>
           </div>
-          {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+          {error && <p className="mt-3 break-words text-sm text-red-500">{error}</p>}
           <button className="btn-primary mt-4 w-full" disabled={!file || busy} onClick={upload}>
             {busy ? `Uploading… ${progress}%` : "Upload & process"}
           </button>

@@ -22,7 +22,7 @@ function RunLine({ label, run }: { label: string; run: PipelineRun | null }) {
   return (
     <p className="text-xs text-zinc-500">
       <span className="font-semibold text-zinc-700 dark:text-zinc-300">{label}: </span>
-      {run ? <><span title={run.message}>{run.message.slice(0, 90)}</span> <span className="text-zinc-400">· {timeAgo(run.at)}</span></> : "never yet"}
+      {run ? <><span title={run.message} className="break-words">{run.message.slice(0, 90)}</span> <span className="text-zinc-400">· {timeAgo(run.at)}</span></> : "never yet"}
     </p>
   );
 }
@@ -57,9 +57,9 @@ function PipelineStatus() {
       </div>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {tiles.map((t) => (
-          <div key={t.label} className="rounded-lg bg-zinc-50 px-2 py-1.5 text-center dark:bg-zinc-900">
-            <p className={`text-base font-extrabold ${t.tone}`}>{t.value}</p>
-            <p className="text-[10px] uppercase tracking-wide text-zinc-400">{t.label}</p>
+          <div key={t.label} className="min-w-0 rounded-lg bg-zinc-50 px-2 py-1.5 text-center dark:bg-zinc-900">
+            <p className={`truncate text-base font-extrabold ${t.tone}`}>{t.value}</p>
+            <p className="break-words text-[10px] uppercase leading-tight tracking-wide text-zinc-400">{t.label}</p>
           </div>
         ))}
       </div>
@@ -226,12 +226,12 @@ export default function ProxiesPage() {
           <Field label="Default country (optional)"><input className="input" value={impCountry} onChange={(e) => setImpCountry(e.target.value)} placeholder="DE" maxLength={2} /></Field>
           <div className="flex items-end"><button className="btn-primary w-full" disabled={!impFile || impBusy} onClick={bulkImport}>{impBusy ? "Importing…" : "Import"}</button></div>
         </div>
-        {impError && <p className="mt-2 text-sm text-red-500">{impError}</p>}
+        {impError && <p className="mt-2 break-words text-sm text-red-500">{impError}</p>}
         {impResult && (
-          <div className="mt-2 text-xs">
-            <p className="text-emerald-600">Added {impResult.added} · {impResult.duplicates_skipped} duplicates skipped · {impResult.errors.filter((e) => e.reason !== "duplicate").length} bad lines</p>
+          <div className="mt-2 min-w-0 text-xs">
+            <p className="break-words text-emerald-600">Added {impResult.added} · {impResult.duplicates_skipped} duplicates skipped · {impResult.errors.filter((e) => e.reason !== "duplicate").length} bad lines</p>
             {impResult.errors.slice(0, 10).map((e, i) => (
-              <p key={i} className="text-zinc-500">line {e.line}: {e.reason} — <code>{e.text}</code></p>
+              <p key={i} className="min-w-0 break-all text-zinc-500">line {e.line}: {e.reason} — <code>{e.text}</code></p>
             ))}
           </div>
         )}
@@ -256,12 +256,12 @@ export default function ProxiesPage() {
         </div>
         <div className="mt-2 space-y-1">
           {((sourceRows ?? []) as ProxySource[]).map((s) => (
-            <div key={s.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-1.5 text-sm first:border-0 dark:border-zinc-800">
-              <span className={`h-2 w-2 rounded-full ${s.is_active ? "bg-emerald-500" : "bg-zinc-400"}`} />
-              <strong>{s.name}</strong>
-              <span className="truncate text-xs text-zinc-500">{s.url} · {s.default_protocol}{s.default_country ? ` · ${s.default_country}` : ""}</span>
-              <span className="text-xs text-zinc-500">last fetch: +{s.last_added}/{s.last_total}</span>
-              <span className="ml-auto flex gap-2">
+            <div key={s.id} className="flex min-w-0 flex-wrap items-center gap-2 border-t border-zinc-100 py-1.5 text-sm first:border-0 dark:border-zinc-800">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${s.is_active ? "bg-emerald-500" : "bg-zinc-400"}`} />
+              <strong title={s.name} className="max-w-[140px] truncate">{s.name}</strong>
+              <span title={s.url} className="min-w-0 flex-1 truncate text-xs text-zinc-500">{s.url} · {s.default_protocol}{s.default_country ? ` · ${s.default_country}` : ""}</span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-zinc-500">last fetch: +{s.last_added}/{s.last_total}</span>
+              <span className="ml-auto flex shrink-0 flex-wrap gap-2">
                 <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggleSource.isPending} onClick={() => toggleSource.mutate({ url: `/proxies/sources/${s.id}`, body: { name: s.name, url: s.url, default_protocol: s.default_protocol, default_country: s.default_country, is_active: !s.is_active } })}>
                   {s.is_active ? "Disable" : "Enable"}
                 </button>
@@ -275,7 +275,7 @@ export default function ProxiesPage() {
         <Card>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <CardTitle>Proxies ({shown.length}/{proxies.length})</CardTitle>
-            <span className="ml-auto flex gap-1">
+            <span className="ml-auto flex flex-wrap justify-end gap-1">
               {(["usable", "new", "bad", "off", "all"] as const).map((f) => (
                 <button
                   key={f}
@@ -287,7 +287,7 @@ export default function ProxiesPage() {
               ))}
             </span>
           </div>
-          <div className="max-h-[420px] overflow-y-auto pr-1">
+          <div className="max-h-[420px] overflow-x-hidden overflow-y-auto pr-1">
           {shown.length === 0 && <p className="py-3 text-center text-xs text-zinc-400">Nothing in this view — try another filter.</p>}
           {shown.map((p) => (
             <div key={p.id} className="flex flex-wrap items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
@@ -295,7 +295,7 @@ export default function ProxiesPage() {
               <code className="min-w-0 break-all text-xs">{p.protocol}://{proxyHost(p.url)}</code>
               <span className="w-full text-zinc-500 sm:w-auto">{p.country ?? ""} · {p.latency_ms != null ? `${p.latency_ms}ms` : "—"} · fails {p.fail_count} · {p.source ?? "manual"}</span>
               {!p.is_active && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-600 dark:bg-red-900/40">disabled</span>}
-              {p.last_error && <span className="max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
+              {p.last_error && <span className="min-w-0 max-w-full truncate text-xs text-red-400" title={p.last_error}>· ⚠ {p.last_error.slice(0, 80)}</span>}
               <span className="ml-auto flex gap-2">
                 <button className="btn-ghost !px-3 !py-1 text-xs" disabled={testBusyId === p.id} onClick={async () => { setTestBusyId(p.id); try { await test.mutateAsync({ url: `/proxies/${p.id}/test` }); } finally { setTestBusyId(null); } }}>{testBusyId === p.id ? "Testing…" : "Test"}</button>
                 <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={delBusyId === p.id} onClick={async () => { if (!confirm("Delete proxy?")) return; setDelBusyId(p.id); try { await remove.mutateAsync({ url: `/proxies/${p.id}` }); } finally { setDelBusyId(null); } }}>{delBusyId === p.id ? "Deleting…" : "Delete"}</button>
@@ -303,7 +303,7 @@ export default function ProxiesPage() {
             </div>
           ))}
           </div>
-          {test.data && <p className="mt-2 text-xs text-zinc-500">Last test: {JSON.stringify(test.data)}</p>}
+          {test.data && <p className="mt-2 break-all text-xs whitespace-pre-wrap text-zinc-500">Last test: {JSON.stringify(test.data)}</p>}
         </Card>
       )}
       <p className="text-xs text-zinc-500">Assign a proxy to an account from the Accounts page (proxy_id). Health checks run every 30 minutes in oldest-first batches (fast TCP sweep, full verify for survivors) so posting never stalls. Results land live via realtime — no page switching needed. Unhealthy auto-fetched proxies are deleted automatically after the retention set in Settings → proxy → pool_purge_after_days (manual ones are never touched).</p>

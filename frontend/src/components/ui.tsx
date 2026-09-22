@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("card p-4 sm:p-5", className)}>{children}</div>;
+  // min-w-0: lets the card shrink inside grids/flex instead of stretching
+  // the page when a child (filename, URL, error) is wider than the viewport.
+  return <div className={cn("card min-w-0 p-4 sm:p-5", className)}>{children}</div>;
 }
 
 export function CardTitle({ children }: { children: ReactNode }) {
-  return <h3 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{children}</h3>;
+  return <h3 className="mb-3 break-words text-sm font-semibold text-zinc-900 dark:text-zinc-100">{children}</h3>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -35,7 +37,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="card flex flex-col items-center gap-1 p-10 text-center">
+    <div className="card flex flex-col items-center gap-1 p-6 text-center sm:p-10">
       <p className="font-semibold">{title}</p>
       {hint && <p className="text-sm text-zinc-500">{hint}</p>}
     </div>
@@ -45,7 +47,7 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
 /** Query failure state with retry — use on every list page (isError branch). */
 export function QueryFailed({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="card flex flex-col items-center gap-2 p-10 text-center">
+    <div className="card flex flex-col items-center gap-2 p-6 text-center sm:p-10">
       <p className="font-semibold">Load failed</p>
       <p className="text-sm text-zinc-500">The request failed. Check the backend connection.</p>
       <button className="btn-ghost !px-3 !py-1 text-xs" onClick={onRetry}>Retry</button>

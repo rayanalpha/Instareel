@@ -225,8 +225,8 @@ export default function VideoDetailPage() {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
-        <div className="mb-2 flex min-w-0 items-center gap-2">
-          <div className="min-w-0 flex-1 truncate"><CardTitle>#{video.id} · {video.original_filename}</CardTitle></div>
+          <div className="mb-2 flex min-w-0 items-center gap-2">
+            <div className="min-w-0 flex-1 truncate" title={video.original_filename}><CardTitle>#{video.id} · {video.original_filename}</CardTitle></div>
           <span className="shrink-0"><StatusBadge status={video.status} /></span>
         </div>
         {previewUrl ? (
@@ -245,9 +245,9 @@ export default function VideoDetailPage() {
         <div className="mt-3 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
           <div className="flex items-center gap-2">
             {thumbUrl ? (
-              <img src={thumbUrl} alt="cover" className="h-20 w-11 rounded object-cover" />
+              <img src={thumbUrl} alt="cover" className="h-20 w-11 shrink-0 rounded object-cover" />
             ) : (
-              <div className="flex h-20 w-11 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400 dark:bg-zinc-800">no cover</div>
+              <div className="flex h-20 w-11 shrink-0 items-center justify-center rounded bg-zinc-100 text-[10px] text-zinc-400 dark:bg-zinc-800">no cover</div>
             )}
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold">
@@ -258,7 +258,7 @@ export default function VideoDetailPage() {
               <p className="text-[11px] text-zinc-500">Posted as the reel cover. Custom wins over the auto frame.</p>
             </div>
           </div>
-          <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
             <label className="btn-ghost cursor-pointer !py-1.5 text-xs">
               {thumbBusy ? "Uploading…" : video.custom_thumbnail_path ? "Replace" : "Upload cover"}
               <input
@@ -279,7 +279,7 @@ export default function VideoDetailPage() {
             <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
               <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress?.percentage ?? 5}%` }} />
             </div>
-            <p className="mt-1 text-xs text-zinc-500">{progress?.stage ?? "processing"} · {(progress?.percentage ?? 0).toFixed(0)}%</p>
+            <p title={typeof progress?.stage === "string" ? progress.stage : undefined} className="mt-1 truncate text-xs text-zinc-500">{progress?.stage ?? "processing"} · {(progress?.percentage ?? 0).toFixed(0)}%</p>
           </div>
         )}
         {video.status === "uploaded" && (
@@ -299,11 +299,11 @@ export default function VideoDetailPage() {
             {process.isPending ? "Queuing…" : "Start processing"}
           </button>
         )}
-        {actionError && <p className="mt-2 text-sm text-red-500">{actionError}</p>}
+        {actionError && <p className="mt-2 break-words text-sm text-red-500">{actionError}</p>}
         {video.status === "failed" && video.failed_reason && (
           <div className="mt-2 rounded-lg border border-red-500 bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
             <p className="font-semibold">Processing failed</p>
-            <p className="mt-1 break-words">{video.failed_reason}</p>
+            <p className="mt-1 break-all">{video.failed_reason}</p>
           </div>
         )}
         {video.status === "processed" && (
@@ -332,7 +332,7 @@ export default function VideoDetailPage() {
               ))}
             </select>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Trim start (s)">
               <input className="input" type="number" min={0} step={0.5} value={form.trim_start} onChange={(e) => setForm({ ...form, trim_start: e.target.value })} />
             </Field>
@@ -344,21 +344,21 @@ export default function VideoDetailPage() {
             <input type="checkbox" checked={form.add_watermark} onChange={(e) => setForm({ ...form, add_watermark: e.target.checked })} />
             Add watermark overlay
           </label>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.is_trial} onChange={(e) => setForm({ ...form, is_trial: e.target.checked })} />
               Trial reel
             </label>
             {form.is_trial && (
-              <select className="input !w-auto !py-1 text-xs" value={form.trial_strategy} onChange={(e) => setForm({ ...form, trial_strategy: e.target.value })}>
+              <select className="input !w-auto max-w-full !py-1 text-xs" value={form.trial_strategy} onChange={(e) => setForm({ ...form, trial_strategy: e.target.value })}>
                 <option value="manual">graduate manually</option>
                 <option value="auto">graduate automatically</option>
               </select>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
-              className="btn-primary flex-1"
+              className="btn-primary min-w-0 flex-1"
               disabled={save.isPending}
               onClick={async () => {
                 setActionError("");
@@ -384,7 +384,7 @@ export default function VideoDetailPage() {
               Save settings
             </button>
             <button
-              className="btn-ghost flex-1"
+              className="btn-ghost min-w-0 flex-1"
               disabled={process.isPending}
               onClick={async () => {
                 setActionError("");
@@ -426,7 +426,7 @@ export default function VideoDetailPage() {
                   {nowState.status === "posted" && nowState.url ? (
                     <a className="text-emerald-500 hover:underline" href={nowState.url} target="_blank">Posted — open reel ↗</a>
                   ) : nowState.status === "failed" ? (
-                    <span className="text-red-500">Failed: {nowState.error ?? "see Posts"}</span>
+                    <span className="break-words text-red-500">Failed: {nowState.error ?? "see Posts"}</span>
                   ) : (
                     <>Posting… ({nowState.status})</>
                   )}

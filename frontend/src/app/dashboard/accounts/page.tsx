@@ -25,7 +25,9 @@ export default function AccountsPage() {
   const proxyList = (proxies ?? []) as Proxy[];
 
   function proxyLabel(p: Proxy): string {
-    const host = proxyHost(p.url);
+    // <option> can't wrap — keep host short; full URL is on the Proxies page.
+    let host = proxyHost(p.url);
+    if (host.length > 26) host = `${host.slice(0, 25)}…`;
     return `${p.protocol}://${host}${p.country ? ` (${p.country})` : ""}${p.is_healthy ? "" : " [down]"}`;
   }
 
@@ -97,9 +99,9 @@ export default function AccountsPage() {
             );
             return (
             <Card key={a.id}>
-              <div className="flex items-center gap-2">
-                <Link href={`/dashboard/accounts/${a.id}`} className="font-semibold hover:text-emerald-500">@{a.username}</Link>
-                <span className="ml-auto"><StatusBadge status={a.status} /></span>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Link href={`/dashboard/accounts/${a.id}`} title={a.username} className="min-w-0 flex-1 truncate break-all font-semibold hover:text-emerald-500">@{a.username}</Link>
+                <span className="ml-auto shrink-0"><StatusBadge status={a.status} /></span>
               </div>
               <p className="mt-1 text-xs text-zinc-500">
                 {a.posts_today}/{a.max_daily_posts} today · {a.total_posts} total · {a.total_views} views · last post {timeAgo(a.last_post)}

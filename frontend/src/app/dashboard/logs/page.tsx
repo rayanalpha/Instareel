@@ -40,7 +40,7 @@ export default function LogsPage() {
               <span className="shrink-0 text-zinc-400">{parseApiDate(l.timestamp).toLocaleString()}</span>
               <span className={`shrink-0 font-semibold ${COLORS[l.level] ?? ""}`}>{l.level}</span>
               <span className="shrink-0 rounded bg-zinc-100 px-1 dark:bg-zinc-800">{l.category}</span>
-              <span className="w-full break-all sm:w-auto sm:flex-1">{l.message}</span>
+              <span className="w-full min-w-0 break-all sm:w-auto sm:flex-1">{l.message}</span>
             </div>
           ))}
         </Card>

@@ -49,9 +49,9 @@ export function Toaster() {
         <div
           key={t.id}
           role="status"
-          className={`flex items-start gap-2 rounded-xl border-2 p-3 text-sm shadow-xl backdrop-blur-md ${STYLES[t.kind]}`}
+          className={`flex max-w-full items-start gap-2 overflow-hidden rounded-xl border-2 p-3 text-sm shadow-xl backdrop-blur-md ${STYLES[t.kind]}`}
         >
-          <span className="flex-1 break-words">{t.message}</span>
+          <span className="min-w-0 flex-1 break-all">{t.message}</span>
           <button
             onClick={() => remove(t.id)}
             className="shrink-0 opacity-60 transition hover:opacity-100"

@@ -106,7 +106,7 @@ export function LivePreview({
   }, [src, watermark, wm]);
 
   return (
-    <div className={`relative overflow-hidden rounded-lg bg-black ${className ?? ""}`}>
+    <div className={`relative w-full max-w-full overflow-hidden rounded-lg bg-black ${className ?? ""}`}>
       <video ref={videoRef} controls src={src} className="aspect-[9/16] max-h-[560px] w-full" style={{ filter: css }} />
       <canvas
         ref={canvasRef}

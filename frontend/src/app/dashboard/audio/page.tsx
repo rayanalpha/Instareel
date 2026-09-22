@@ -63,16 +63,16 @@ export default function AudioPage() {
           </Field>
           <Field label="Name"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="From filename" /></Field>
           <Field label="Music level (0–2)"><input className="input" value={form.music_volume} onChange={(e) => setForm({ ...form, music_volume: e.target.value })} placeholder="0.4" /></Field>
-          <div className="flex items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.duck_original} onChange={(e) => setForm({ ...form, duck_original: e.target.checked })} />
               Duck original
             </label>
-            <button className="btn-primary flex-1" disabled={!file || busy} onClick={upload}>{busy ? "Uploading…" : "Add"}</button>
+            <button className="btn-primary min-w-0 flex-1" disabled={!file || busy} onClick={upload}>{busy ? "Uploading…" : "Add"}</button>
           </div>
         </div>
         <div className="mt-3"><Field label="Description"><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Viral hook — 15s chorus" /></Field></div>
-        {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+        {error && <p className="mt-2 break-words text-sm text-red-500">{error}</p>}
       </Card>
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : tracks.length === 0 ? <EmptyState title="No tracks" hint="Upload trending sounds above — processing auto-picks from active tracks." /> : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -81,14 +81,14 @@ export default function AudioPage() {
             return (
               <Card key={t.id}>
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <strong className="min-w-0 truncate">{t.name}</strong>
-                  <span className="text-xs text-zinc-500">{t.duration ? `${t.duration.toFixed(0)}s` : ""} · lvl {t.music_volume}{t.duck_original ? " · ducked" : ""}</span>
-                  <span className="ml-auto text-xs text-zinc-500">
+                  <strong title={t.name} className="min-w-0 flex-1 truncate">{t.name}</strong>
+                  <span className="shrink-0 text-xs text-zinc-500">{t.duration ? `${t.duration.toFixed(0)}s` : ""} · lvl {t.music_volume}{t.duck_original ? " · ducked" : ""}</span>
+                  <span className="shrink-0 text-xs text-zinc-500">
                     {s ? `${s.posts} posts · ${s.avg_engagement}% eng. · ${s.views} views` : `used ${t.use_count}×`}
                   </span>
                 </div>
-                {t.description && <p className="mt-1 text-sm text-zinc-500">{t.description}</p>}
-                <div className="mt-2 flex gap-2">
+                {t.description && <p className="mt-1 break-words text-sm text-zinc-500">{t.description}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     className="btn-ghost !py-1 text-xs"
                     disabled={toggle.isPending}
