@@ -53,6 +53,29 @@ def _safe_filename(settings_path: str) -> str:
         return ""
 
 
+def _persisted_mismatches(sent: dict, actual: dict) -> list:
+    """Sections we asked IG to save but it silently dropped.
+
+    edit_profile returns status ok even when it ignores fields (e.g. links
+    on restricted accounts). Pure function so it can be unit-tested.
+    sent keys: biography, external_url, full_name (as sent); actual: the
+    account_info dict re-read afterwards.
+    """
+    problems = []
+    if sent.get("biography") and (actual.get("biography") or "").strip() != sent["biography"].strip():
+        problems.append("biography")
+    if sent.get("external_url"):
+        want = str(sent["external_url"]).rstrip("/")
+        got = str(actual.get("external_url") or "").rstrip("/")
+        if got != want:
+            problems.append("link")
+    if sent.get("full_name"):
+        want = str(sent["full_name"]).strip()[:64]
+        if (actual.get("full_name") or "").strip() != want:
+            problems.append("full name")
+    return problems
+
+
 class InstagramService:
     def __init__(self, proxy_url: str | None = None, session_path: str | None = None):
         self.proxy_url = proxy_url
@@ -240,6 +263,19 @@ class InstagramService:
                     cl.dump_settings(self.session_path)
                 except Exception:
                     pass
+            # Read-back: IG answers ok even when it silently drops fields.
+            # Never report success for something that isn't on the profile.
+            if edit:
+                try:
+                    after = cl.account_info().dict()
+                except Exception:
+                    after = {}
+                dropped = _persisted_mismatches(edit, after)
+                if dropped:
+                    return (
+                        "unpersisted: Instagram accepted the edit but did not save "
+                        + ", ".join(dropped)
+                    )
             return ""
         except Exception as exc:
             return f"{_classify(exc)}: {exc}"

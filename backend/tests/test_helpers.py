@@ -1790,3 +1790,33 @@ class TestCrypto:
     def test_empty_passthrough(self):
         assert encrypt_secret(None) is None
         assert decrypt_secret(None) is None
+
+
+class TestPersistedMismatches:
+    def test_all_saved(self):
+        from app.services.instagram_service import _persisted_mismatches
+
+        sent = {"biography": "hi", "external_url": "https://t.me/x", "full_name": "Brand"}
+        actual = {"biography": "hi", "external_url": "https://t.me/x", "full_name": "Brand"}
+        assert _persisted_mismatches(sent, actual) == []
+
+    def test_silently_dropped_link(self):
+        from app.services.instagram_service import _persisted_mismatches
+
+        sent = {"external_url": "https://t.me/x"}
+        assert _persisted_mismatches(sent, {"external_url": ""}) == ["link"]
+        assert _persisted_mismatches(sent, {}) == ["link"]
+
+    def test_tolerates_slash_and_truncation(self):
+        from app.services.instagram_service import _persisted_mismatches
+
+        assert _persisted_mismatches(
+            {"external_url": "https://t.me/x"}, {"external_url": "https://t.me/x/"}
+        ) == []
+        assert _persisted_mismatches({"full_name": "n" * 100}, {"full_name": "n" * 64}) == []
+
+    def test_unsent_sections_never_flagged(self):
+        from app.services.instagram_service import _persisted_mismatches
+
+        assert _persisted_mismatches({}, {"biography": "whatever"}) == []
+        assert _persisted_mismatches({"biography": "hi"}, {"biography": "other"}) == ["biography"]

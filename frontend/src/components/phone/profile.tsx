@@ -100,12 +100,25 @@ export function PhoneProfile({
         ? mine.filter((p) => p.is_trial)
         : mine;
 
-  const displayName = live?.full_name || bio?.full_name || account.username;
-  const biography = live?.biography || bio?.text || "";
-  const link = live?.external_url || bio?.link_url || "";
+  const usingLive = live !== null;
+  // Live values ONLY — falling back to the staged config here once showed
+  // typed-but-unapplied drafts as if they were on Instagram. Drafts get
+  // their own explicit badges below instead.
+  const displayName = live?.full_name || account.username;
+  const biography = live?.biography || "";
+  const link = live?.external_url || "";
   const followers = live?.follower_count ?? null;
   const following = live?.following_count ?? null;
   const postCount = live?.media_count ?? mine.filter((p) => p.status === "posted").length;
+  // Staged values that differ from what's actually on Instagram.
+  const pending: string[] = [];
+  if (usingLive && bio) {
+    if ((bio.text || "") !== (live?.biography || "")) pending.push("bio");
+    if ((bio.link_url || "") !== (live?.external_url || "")) pending.push("link");
+    if ((bio.full_name || "") !== (live?.full_name || "")) pending.push("name");
+    if (bio.has_picture) pending.push("picture");
+    if (bio.make_private !== null && bio.make_private !== undefined && bio.make_private !== live?.is_private) pending.push("privacy");
+  }
 
   async function shareProfile() {
     const url = `https://www.instagram.com/${account.username}/`;
@@ -151,7 +164,18 @@ export function PhoneProfile({
         ) : (
           <span className="text-zinc-500">{link}</span>
         ))}
-        {bio === null && <p className="text-zinc-500">No profile config — create one in Bios.</p>}
+        {bio === null && <p className="text-zinc-500">No profile config — create one in Profile.</p>}
+        {!usingLive && bio !== null && !liveFailed && (
+          <p className="text-xs text-amber-600">Loading live profile… showing nothing until Instagram answers.</p>
+        )}
+        {!usingLive && bio !== null && (
+          <p className="text-xs text-amber-600">
+            Draft on file{bio.text ? `: “${bio.text.slice(0, 80)}${bio.text.length > 80 ? "…" : ""}”` : ""} — not on Instagram until you Apply it.
+          </p>
+        )}
+        {usingLive && pending.length > 0 && (
+          <p className="text-xs text-amber-600">Unapplied draft changes: {pending.join(", ")}.</p>
+        )}
         {liveFailed && <p className="text-xs text-amber-600">Live data unavailable (session/proxy).</p>}
       </div>
       <div className="flex gap-2 px-4 pb-2">
