@@ -167,7 +167,9 @@ def ingest_source(self, source_id: int):
                 return fail(s, source, f"Download account @{username} has no session file")
 
             svc = InstagramService(proxy_url=purl, session_path=spath)
-            cl = svc._make_client(username)
+            # Bulk CDN pulls of multi-MB reels need a generous per-read
+            # timeout (instagrapi defaults to 1s — stalls kill downloads).
+            cl = svc._make_client(username, request_timeout=60)
             # Session-first check via the shared helper (same as profile ops).
             from app.services.instagram_service import _feed_with_retry
 

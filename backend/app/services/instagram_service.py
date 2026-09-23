@@ -81,11 +81,12 @@ class InstagramService:
         self.proxy_url = proxy_url
         self.session_path = session_path
 
-    def _make_client(self, username: str, session_first: bool = True):
+    def _make_client(self, username: str, session_first: bool = True,
+                     request_timeout: float = 30):
         from instagrapi import Client
         from app.utils.instagram_helpers import device_settings_for
 
-        cl = Client()
+        cl = Client(request_timeout=request_timeout)
         cl.delay_range = [1, 3]
         if self.proxy_url:
             cl.set_proxy(self.proxy_url)
@@ -105,6 +106,9 @@ class InstagramService:
         if not loaded:
             # No usable session: fall back to the deterministic fingerprint.
             cl.set_device(device_settings_for(username))
+        # load_settings()/init() restores request_timeout from the session
+        # file (dumped with instagrapi's 1s default) — enforce ours after.
+        cl.request_timeout = request_timeout
         return cl
 
     def login(self, username: str, password: str) -> tuple[bool, str]:

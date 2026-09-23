@@ -735,11 +735,12 @@ class _FakeIGClient:
 
     made: list = []
 
-    def __init__(self):
+    def __init__(self, *a, **kw):
         self.calls: list = []
         self.settings: dict = {}
         self.fail_feed = 0
         self.feed_calls = 0
+        self.request_timeout = kw.get("request_timeout", 1)
         _FakeIGClient.made.append(self)
 
     def set_device(self, d):
@@ -892,6 +893,31 @@ class TestApplyProfile:
         assert svc.apply_profile("u", "p", biography="x") == ""
         kinds = [c[0] for c in Dead.made[-1].calls]
         assert "login" in kinds and "edit" in kinds
+
+
+class TestMakeClientTimeout:
+    def test_request_timeout_enforced_after_stale_session_load(self, monkeypatch, tmp_path):
+        import json
+
+        import instagrapi
+
+        class StaleFile(_FakeIGClient):
+            def load_settings(self, p):
+                # Real init() restores request_timeout from the dumped file
+                # (old instagrapi default was 1s) — our value must win after.
+                self.settings = {"request_timeout": 1}
+                self.request_timeout = 1
+                self.calls.append(("load", p))
+
+        monkeypatch.setattr(instagrapi, "Client", StaleFile)
+        spath = tmp_path / "sess.json"
+        spath.write_text(json.dumps({"request_timeout": 1}))
+
+        from app.services.instagram_service import InstagramService
+
+        svc = InstagramService(session_path=str(spath))
+        assert svc._make_client("u").request_timeout == 30
+        assert svc._make_client("u", request_timeout=60).request_timeout == 60
 
 
 class TestRateLimitWiring:
