@@ -71,7 +71,7 @@ export function PhoneComposer({ account, effects, audios }: { account: Account; 
       <input className="input" placeholder="#hashtags…" value={hashtags} onChange={(e) => setHashtags(e.target.value)} />
       <div className="grid grid-cols-2 gap-2">
         <select className="input" value={effect} onChange={(e) => setEffect(e.target.value)}>
-          <option value="">Effect: auto</option>
+          <option value="">Effect: none</option>
           {effects.map((n) => (
             <option key={n} value={n}>{n}</option>
           ))}

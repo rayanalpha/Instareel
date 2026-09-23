@@ -104,7 +104,7 @@ export default function PhonePage() {
                 <p className="break-words whitespace-pre-wrap">{[selected.caption, selected.hashtags].filter(Boolean).join(" ")}</p>
               )}
               <p className="break-words"><span className="text-zinc-500">Audio</span> {selected.audio_track ?? "—"}</p>
-              <p><span className="text-zinc-500">Effect</span> {selectedVideo?.effect_preset ?? "auto"}</p>
+              <p><span className="text-zinc-500">Effect</span> {selectedVideo?.effect_preset ?? "none"}</p>
               <p>
                 <span className="text-zinc-500">Views</span> {fmt(selected.views_7d ?? selected.views_24h)}
                 {" · "}<span className="text-zinc-500">Eng.</span> {selected.engagement_rate ?? 0}%
