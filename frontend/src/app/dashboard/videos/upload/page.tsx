@@ -122,7 +122,7 @@ export default function UploadPage() {
           <div className="mt-4 space-y-3">
             <Field label="Effect preset (live preview)">
               <select className="input" value={effect} onChange={(e) => setEffect(e.target.value)}>
-                <option value="">Auto (random active preset)</option>
+                <option value="">None (no effect)</option>
                 {((effects ?? []) as { name: string; description: string }[]).map((e) => (
                   <option key={e.name} value={e.name}>{e.name}</option>
                 ))}

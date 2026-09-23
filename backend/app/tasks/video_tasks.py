@@ -4,7 +4,6 @@ Fully synchronous: no asyncio.run, no event loop. Uses SyncSessionLocal
 and the sync FFmpeg pipeline.
 """
 import logging
-import random
 
 from app.tasks.celery_app import celery
 
@@ -71,12 +70,8 @@ def process_video_task(self, video_id: int, effect_filter: str = "", color_grade
                     ).scalars().first()
                     if preset:
                         effect_filter = preset.ffmpeg_filter or ""
-                if not effect_filter:
-                    presets = s.execute(
-                        select(EffectPreset).where(EffectPreset.is_active.is_(True))
-                    ).scalars().all()
-                    if presets:
-                        effect_filter = random.choice(presets).ffmpeg_filter or ""
+                # Otherwise the filter stays empty: default is NO effect.
+                # A preset is only applied when the user explicitly chose one.
         process_video_sync(video_id, effect_filter, color_grade)
         publish_sync("video_processing_complete", {"video_id": video_id, "status": "processed"})
         log_event_sync("INFO", "video", f"Video {video_id} processed successfully")

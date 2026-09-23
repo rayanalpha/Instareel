@@ -323,7 +323,7 @@ export default function VideoDetailPage() {
         <div className="space-y-3">
           <Field label="Effect preset">
             <select className="input" value={form.effect_preset} onChange={(e) => setForm({ ...form, effect_preset: e.target.value })}>
-              <option value="">Auto (random active preset)</option>
+              <option value="">None (no effect)</option>
               {((effects ?? []) as { name: string; description: string }[]).map((e) => (
                 <option key={e.name} value={e.name}>{e.name} — {e.description.slice(0, 60)}</option>
               ))}
