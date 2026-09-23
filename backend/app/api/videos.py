@@ -31,6 +31,7 @@ def _out(v: Video) -> VideoOut:
         custom_filters=v.custom_filters, is_trial=v.is_trial, trial_strategy=v.trial_strategy,
         add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
+        source_caption=v.source_caption,
         processed_at=v.processed_at, thumbnail_path=v.thumbnail_path,
         custom_thumbnail_path=v.custom_thumbnail_path, created_at=v.created_at,
     )

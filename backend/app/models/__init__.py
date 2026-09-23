@@ -12,6 +12,7 @@ from app.models.content import (
     SystemLog
 )
 from app.models.video import Post, PostStatus, Video, VideoStatus
+from app.models.video_source import SourceItem, SourceItemStatus, SourceStatus, VideoSource
 
 __all__ = [
     "Account",
@@ -32,4 +33,8 @@ __all__ = [
     "SystemLog",
     "LogLevel",
     "Setting",
+    "VideoSource",
+    "SourceStatus",
+    "SourceItem",
+    "SourceItemStatus",
 ]

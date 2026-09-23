@@ -18,6 +18,7 @@ class VideoOut(BaseModel):
     trim_start: float | None
     trim_end: float | None
     failed_reason: str | None
+    source_caption: str | None = None
     processed_at: dt.datetime | None
     thumbnail_path: str | None
     custom_thumbnail_path: str | None

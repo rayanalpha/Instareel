@@ -5,6 +5,7 @@ from app.api import auth
 from app.api.accounts import router as accounts_router
 from app.api.resources import audio_router, bio_router, effect_router, proxy_router
 from app.api.scheduling import caption_router, hashtag_router, schedule_router
+from app.api.sources import source_router
 from app.api.system import analytics_router, logs_router, settings_router, ws_router
 from app.api.videos import posts_router, router as videos_router
 
@@ -14,6 +15,7 @@ router.include_router(accounts_router, prefix="/accounts", tags=["accounts"])
 router.include_router(videos_router, prefix="/videos", tags=["videos"])
 router.include_router(posts_router, prefix="/posts", tags=["posts"])
 router.include_router(schedule_router, prefix="/schedule", tags=["schedule"])
+router.include_router(source_router, prefix="/sources", tags=["sources"])
 router.include_router(caption_router, prefix="/captions", tags=["captions"])
 router.include_router(hashtag_router, prefix="/hashtags", tags=["hashtags"])
 router.include_router(bio_router, prefix="/bios", tags=["bios"])

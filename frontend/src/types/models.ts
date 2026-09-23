@@ -10,6 +10,7 @@ export interface Video {
   status: string; effect_preset: string | null; audio_track: string | null; is_trial: boolean;
   trial_strategy: string; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
+  source_caption: string | null;
   processed_at: string | null; thumbnail_path: string | null; created_at: string;
 }
 
@@ -35,6 +36,21 @@ export interface IgProfile { username: string; full_name: string; biography: str
 export interface Proxy { id: number; url: string; protocol: string; username: string | null; country: string | null; is_healthy: boolean; last_checked: string | null; fail_count: number; latency_ms: number | null; last_error: string | null; source: string | null; is_active: boolean; }
 export interface ProxyImportResult { added: number; duplicates_skipped: number; errors: { line: number; text: string; reason: string }[]; }
 export interface ProxySource { id: number; name: string; url: string; default_protocol: string; default_country: string; is_active: boolean; last_fetch_at: string | null; last_added: number; last_total: number; }
+export interface VideoSource {
+  id: number; username: string; account_id: number | null;
+  status: "idle" | "running" | "stopping" | "completed" | "failed";
+  max_items: number; reels_only: boolean; with_covers: boolean; auto_process: boolean;
+  delay_min_s: number; delay_max_s: number; has_cursor: boolean;
+  fetched: number; downloaded: number; skipped: number; failed_count: number;
+  total_items: number; pending_items: number;
+  last_error: string | null; current_stage: string | null;
+  started_at: string | null; finished_at: string | null; created_at: string;
+}
+export interface SourceItem {
+  id: number; media_pk: string; shortcode: string; media_type: string;
+  status: "pending" | "downloading" | "downloaded" | "skipped" | "failed";
+  video_id: number | null; error: string | null; created_at: string;
+}
 export interface Effect { id: number; name: string; description: string; ffmpeg_filter: string; is_active: boolean; use_count: number; avg_engagement: number | null; }
 export interface AudioTrack { id: number; name: string; description: string; file_path: string; duration: number | null; music_volume: number; duck_original: boolean; is_active: boolean; use_count: number; avg_engagement: number | null; }
 export interface AudioStats { id: number; name: string; posts: number; avg_engagement: number; views: number; use_count: number; is_active: boolean; }

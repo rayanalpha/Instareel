@@ -31,4 +31,5 @@ celery.conf.beat_schedule = {
 # unreliable for the package that holds the Celery app itself, esp. on Windows).
 import app.tasks.periodic_tasks  # noqa: F401
 import app.tasks.post_tasks  # noqa: F401
+import app.tasks.source_tasks  # noqa: F401
 import app.tasks.video_tasks  # noqa: F401

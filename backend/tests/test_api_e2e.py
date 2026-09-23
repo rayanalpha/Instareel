@@ -298,6 +298,53 @@ class TestPosts:
 
 
 class TestResources:
+    def test_sources_crud_lifecycle(self, client, monkeypatch):
+        c, _, _ = client
+        calls = []
+
+        class FakeTask:
+            def delay(self, sid):
+                calls.append(sid)
+
+        monkeypatch.setattr("app.tasks.source_tasks.ingest_source", FakeTask())
+        # Validation first (no broker touched).
+        assert c.post("/api/v1/sources", json={"username": "bad name!"}).status_code == 422
+        assert c.post("/api/v1/sources", json={"username": "a", "max_items": 0}).status_code == 422
+        assert c.post("/api/v1/sources", json={"username": "a", "max_items": 201}).status_code == 422
+        assert c.post("/api/v1/sources", json={"username": "a", "delay_min_s": 10, "delay_max_s": 5}).status_code == 422
+        assert c.post("/api/v1/sources", json={"username": "a", "account_id": 999}).status_code == 404
+        r = c.post("/api/v1/sources", json={"username": "@UPPER.Case_9"})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        sid = body["id"]
+        assert body["username"] == "upper.case_9" and body["status"] == "idle"
+        assert c.post("/api/v1/sources", json={"username": "upper.case_9"}).status_code == 409
+        assert c.get("/api/v1/sources/999999").status_code == 404
+        assert c.get(f"/api/v1/sources/{sid}/items").json() == []
+        assert c.get(f"/api/v1/sources/{sid}/items?status=bogus").status_code == 422
+        assert c.post(f"/api/v1/sources/{sid}/retry-failed").json() == {"reset": 0}
+        assert c.post(f"/api/v1/sources/{sid}/stop").status_code == 409  # idle
+        assert c.post("/api/v1/sources/999999/start").status_code == 404
+        # Start claims atomically and queues the task.
+        started = c.post(f"/api/v1/sources/{sid}/start")
+        assert started.status_code == 200, started.text
+        assert started.json()["status"] == "running" and calls == [sid]
+        assert c.post(f"/api/v1/sources/{sid}/start").status_code == 409  # double-start
+        assert c.put(f"/api/v1/sources/{sid}", json={}).status_code == 409
+        assert c.delete(f"/api/v1/sources/{sid}").status_code == 409
+        stopped = c.post(f"/api/v1/sources/{sid}/stop")
+        assert stopped.status_code == 200 and stopped.json()["status"] == "stopping"
+        assert c.post(f"/api/v1/sources/{sid}/stop").status_code == 409
+        assert c.post(f"/api/v1/sources/{sid}/start").status_code == 409  # stopping != runnable
+        # Settings editable once parked (simulate park via delete-guard path):
+        # force back to idle through a fresh source for the PUT happy path.
+        r2 = c.post("/api/v1/sources", json={"username": "second.page"}).json()
+        ok = c.put(f"/api/v1/sources/{r2['id']}", json={"max_items": 50, "reels_only": False})
+        assert ok.status_code == 200 and ok.json()["max_items"] == 50
+        assert c.put(f"/api/v1/sources/{r2['id']}", json={"account_id": 999}).status_code == 404
+        assert c.delete(f"/api/v1/sources/{r2['id']}").status_code == 204
+        assert c.get(f"/api/v1/sources/{r2['id']}").status_code == 404
+
     def test_effects_crud(self, client):
         c, _, _ = client
         r = c.post("/api/v1/effects", json={"name": "t1", "description": "d", "ffmpeg_filter": "eq=1"})

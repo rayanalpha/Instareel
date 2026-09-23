@@ -265,11 +265,13 @@ class InstagramService:
                     pass
             # Read-back: IG answers ok even when it silently drops fields.
             # Never report success for something that isn't on the profile.
+            # (A failed re-read is not proof of a drop — only a fresh,
+            # contradictory snapshot counts.)
             if edit:
                 try:
                     after = cl.account_info().dict()
                 except Exception:
-                    after = {}
+                    return ""
                 dropped = _persisted_mismatches(edit, after)
                 if dropped:
                     return (

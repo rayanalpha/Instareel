@@ -749,6 +749,21 @@ class _FakeIGClient:
         self.calls.append(("edit", kw))
         return True
 
+    drop_fields: list = []
+
+    def account_info(self):
+        # Echoes the last edit (i.e. IG persisted everything), minus any
+        # fields the test wants to simulate as silently dropped.
+        self.calls.append(("info",))
+        from types import SimpleNamespace
+
+        edit = {}
+        for c in self.calls:
+            if c[0] == "edit":
+                edit = c[1]
+        d = {k: v for k, v in edit.items() if k not in _FakeIGClient.drop_fields}
+        return SimpleNamespace(dict=lambda: d)
+
     def account_change_picture(self, p):
         self.calls.append(("pic", str(p)))
         return True
@@ -808,6 +823,15 @@ class TestApplyProfile:
         kinds = [c[0] for c in cl.calls]
         assert "feed" in kinds
         assert not ({"edit", "pic", "private", "public", "login"} & set(kinds))
+
+    def test_silently_dropped_field_reported(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        _FakeIGClient.drop_fields = ["external_url"]
+        try:
+            err = svc.apply_profile("u", "p", biography="hey", external_url="https://t.me/x")
+        finally:
+            _FakeIGClient.drop_fields = []
+        assert err.startswith("unpersisted") and "link" in err
 
     def test_missing_picture_fails_before_any_call(self, monkeypatch):
         svc = self._svc(monkeypatch)
@@ -1790,6 +1814,19 @@ class TestCrypto:
     def test_empty_passthrough(self):
         assert encrypt_secret(None) is None
         assert decrypt_secret(None) is None
+
+
+class TestShouldTakeMedia:
+    def test_gates(self):
+        from app.tasks.source_tasks import should_take_media
+
+        assert should_take_media(2, "clips", True) == (True, "")
+        assert should_take_media(2, "feed", True)[0] is False
+        assert should_take_media(2, "feed", False) == (True, "")
+        assert should_take_media(2, "", False) == (True, "")
+        assert should_take_media(1, "", False)[0] is False
+        assert should_take_media(8, "", False)[0] is False
+        assert should_take_media(99, "", False)[0] is False
 
 
 class TestPersistedMismatches:

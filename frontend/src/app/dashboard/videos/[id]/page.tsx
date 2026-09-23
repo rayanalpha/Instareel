@@ -11,6 +11,7 @@ interface Detail {
   effect_preset: string | null; audio_track: string | null; is_trial: boolean;
   trial_strategy: string; add_watermark: boolean;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
+  source_caption: string | null;
   custom_thumbnail_path: string | null;
 }
 
@@ -309,6 +310,12 @@ export default function VideoDetailPage() {
         {video.status === "processed" && (
           <div className="mt-2 rounded-lg border border-emerald-500 bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
             <span className="font-semibold">Processed —</span> preview is ready and Post now is unlocked below.
+          </div>
+        )}
+        {video.source_caption && (
+          <div className="mt-2 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
+            <p className="font-semibold">Original caption (from source page)</p>
+            <p className="mt-1 break-words whitespace-pre-wrap text-zinc-600 dark:text-zinc-400">{video.source_caption}</p>
           </div>
         )}
       </Card>

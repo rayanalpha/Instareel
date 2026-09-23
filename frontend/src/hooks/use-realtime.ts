@@ -6,6 +6,7 @@ import { apiBase } from "@/lib/api";
 const EVENTS = [
   "video_processing_progress",
   "video_processing_complete",
+  "video_source_update",
   "post_status_update",
   "account_status_change",
   "new_log",
@@ -55,6 +56,7 @@ export function useRealtimeFeed(enabled: boolean) {
           tries.current = 0;
           if (msg.event.startsWith("video")) {
             qc.invalidateQueries({ queryKey: ["videos"] });
+            qc.invalidateQueries({ queryKey: ["video-sources"] });
             qc.invalidateQueries({ queryKey: ["overview"] });
           } else if (msg.event.startsWith("post")) {
             qc.invalidateQueries({ queryKey: ["posts"] });

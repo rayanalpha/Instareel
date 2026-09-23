@@ -42,6 +42,9 @@ class Video(Base, TimestampMixin):
     md5_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[VideoStatus] = mapped_column(Enum(VideoStatus), default=VideoStatus.uploaded)
     upload_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Original caption from a video source (IG page ingest) — kept for
+    # reference/reuse; Post captions still come from templates at schedule.
+    source_caption: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     effect_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Name of the AudioTrack mixed in at processing time (resolved like effect_preset).
