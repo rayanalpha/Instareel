@@ -681,3 +681,18 @@ def pick_hashtags(session, last_tags: str = "") -> str:
     chosen.use_count = (chosen.use_count or 0) + 1
     selected = random.sample(tags, k=min(len(tags), random.randint(3, 5)))
     return " ".join(t if t.startswith("#") else f"#{t}" for t in selected)
+
+
+def resolve_fire_caption(session, prefer_source: bool, source_caption: "str | None",
+                         template_id: "int | None") -> "tuple[str, str]":
+    """Caption + hashtags for a firing post (pure decision, unit tested).
+
+    A harvested source caption posts verbatim — its hashtags already ship
+    inside it, so no extra set is appended. Otherwise template + hashtag
+    set, exactly as before.
+    """
+    src = (source_caption or "").strip()
+    if prefer_source and src:
+        return src, ""
+    caption, _ = pick_caption(session, template_id)
+    return caption, pick_hashtags(session)

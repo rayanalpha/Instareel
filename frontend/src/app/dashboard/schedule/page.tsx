@@ -23,7 +23,8 @@ export default function SchedulePage() {
   const remove = useApiMutation("delete", [["rules"]], "Rule deleted");
   const toggle = useApiMutation("post", [["rules"]], "Rule updated");
   const pin = useApiMutation("post", [["rules"]], "Pin updated");
-  const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", pinned_video_id: "" });
+  const update = useApiMutation("put", [["rules"]], "Rule updated");
+  const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", prefer_source_caption: true, pinned_video_id: "" });
   const list = (rules ?? []) as ScheduleRule[];
 
   function submit() {
@@ -35,10 +36,11 @@ export default function SchedulePage() {
         account_id: form.account_id ? Number(form.account_id) : null,
         preferred_effect: form.preferred_effect || null,
         caption_template_id: form.caption_template_id ? Number(form.caption_template_id) : null,
+        prefer_source_caption: form.prefer_source_caption,
         pinned_video_id: form.pinned_video_id ? Number(form.pinned_video_id) : null,
       },
     });
-    setForm({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", pinned_video_id: "" });
+    setForm({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", prefer_source_caption: true, pinned_video_id: "" });
   }
 
   function ruleState(r: ScheduleRule) {
@@ -120,6 +122,10 @@ export default function SchedulePage() {
               {((captions ?? []) as Caption[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
+          <label className="flex items-center gap-1.5 text-xs" title="Videos harvested from sources carry their original caption — post it verbatim instead of a template.">
+            <input type="checkbox" checked={form.prefer_source_caption} onChange={(e) => setForm({ ...form, prefer_source_caption: e.target.checked })} />
+            Prefer source caption
+          </label>
           <div className="flex items-end"><button className="btn-primary w-full" onClick={submit} disabled={create.isPending}>{create.isPending ? "Adding…" : "Add rule"}</button></div>
         </div>
       </Card>
@@ -138,6 +144,22 @@ export default function SchedulePage() {
                 </span>
                 <span className="ml-auto flex shrink-0 flex-wrap gap-2">
                   <button className="btn-ghost !px-3 !py-1 text-xs" disabled={toggle.isPending} onClick={() => toggle.mutate({ url: `/schedule/${r.id}/toggle` })}>{toggle.isPending ? "Saving…" : "Toggle"}</button>
+                  <button
+                    className="btn-ghost !px-3 !py-1 text-xs"
+                    disabled={update.isPending}
+                    title="When ON, a harvested source caption posts verbatim instead of a template. PUT takes the full rule — every field is re-sent."
+                    onClick={() => update.mutate({
+                      url: `/schedule/${r.id}`,
+                      body: {
+                        name: r.name, day_of_week: r.day_of_week, hour: r.hour, minute: r.minute,
+                        account_id: r.account_id, is_active: r.is_active, preferred_effect: r.preferred_effect,
+                        caption_template_id: r.caption_template_id,
+                        prefer_source_caption: !r.prefer_source_caption, pinned_video_id: r.pinned_video_id,
+                      },
+                    })}
+                  >
+                    {update.isPending ? "Saving…" : r.prefer_source_caption ? "Src caption ✓" : "Src caption off"}
+                  </button>
                   <button className="btn-ghost !px-3 !py-1 text-xs text-red-500" disabled={remove.isPending} onClick={() => { if (confirm(`Delete rule "${r.name}"?`)) remove.mutate({ url: `/schedule/${r.id}` }); }}>{remove.isPending ? "Deleting…" : "Delete"}</button>
                 </span>
               </div>

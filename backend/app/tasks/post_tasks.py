@@ -56,8 +56,10 @@ def check_and_post(self):
                             f"Rule '{rule.name}' waiting: pinned video not postable yet",
                         )
                     continue
-                caption, _ = sched.pick_caption(s, rule.caption_template_id)
-                tags = sched.pick_hashtags(s)
+                caption, tags = sched.resolve_fire_caption(
+                    s, bool(rule.prefer_source_caption),
+                    video.source_caption, rule.caption_template_id,
+                )
                 # Â±5 min jitter
                 when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=random.randint(-5, 5))
                 s.add(

@@ -23,6 +23,9 @@ class ScheduleRule(Base, TimestampMixin):
     caption_template_id: Mapped[int | None] = mapped_column(
         ForeignKey("caption_templates.id"), nullable=True
     )
+    # When the fired video carries a harvested source_caption, post it
+    # verbatim (its hashtags ship inside it) instead of a template.
+    prefer_source_caption: Mapped[bool] = mapped_column(Boolean, default=True)
     # Hybrid scheduling: when set, this rule fires exactly this video (then
     # retires). When NULL, the rule draws oldest-processed from the queue.
     # preferred_effect is ignored while pinned.

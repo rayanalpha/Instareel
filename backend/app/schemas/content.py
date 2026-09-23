@@ -13,6 +13,7 @@ class ScheduleRuleIn(BaseModel):
     is_active: bool = True
     preferred_effect: str | None = None
     caption_template_id: int | None = None
+    prefer_source_caption: bool = True
     # Pinned video for one-shot scheduling (NULL = draw from the queue).
     pinned_video_id: int | None = None
 

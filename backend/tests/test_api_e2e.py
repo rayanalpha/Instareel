@@ -348,6 +348,29 @@ class TestPosts:
         assert c.post(f"/api/v1/posts/{pid}/retry").status_code == 400
         assert c.delete(f"/api/v1/posts/{pid}").status_code == 204
 
+    def test_manual_schedule_prefers_source_caption(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="cap1", password_enc="x"))
+                s.add(Video(original_filename="s.mp4", raw_path="/tmp/s.mp4",
+                            md5_hash="capsrc", status=VideoStatus.processed,
+                            source_caption="stolen gems #repost"))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "cap1"))).scalar_one()
+                v = (await s.execute(select(Video).where(Video.md5_hash == "capsrc"))).scalar_one()
+                return acc.id, v.id
+
+        import asyncio
+
+        acc_id, vid_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.post("/api/v1/posts/schedule", json={"video_id": vid_id, "account_id": acc_id})
+        assert r.status_code == 201, r.text
+        # Source caption posts verbatim; no extra hashtag set is appended.
+        assert r.json()["caption"] == "stolen gems #repost"
+        assert r.json()["hashtags"] == ""
+
 
 class TestResources:
     def test_sources_crud_lifecycle(self, client, monkeypatch):
@@ -629,6 +652,12 @@ class TestResources:
         assert rule.status_code == 201, rule.text
         rid = rule.json()["id"]
         assert c.post(f"/api/v1/schedule/{rid}/toggle").json()["is_active"] is False
+        # Source-caption preference defaults on and toggles via full-body PUT.
+        assert rule.json()["prefer_source_caption"] is True
+        full = {**rule.json(), "prefer_source_caption": False}
+        full.pop("id", None); full.pop("created_at", None)
+        full.pop("pinned_video_label", None); full.pop("pinned_video_status", None)
+        assert c.put(f"/api/v1/schedule/{rid}", json=full).json()["prefer_source_caption"] is False
         assert c.delete(f"/api/v1/schedule/{rid}").status_code == 204
         cap = c.post("/api/v1/captions", json={"name": "c", "content": "hello {x}"})
         assert cap.status_code == 201

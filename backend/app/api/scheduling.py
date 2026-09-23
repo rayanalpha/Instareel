@@ -32,7 +32,8 @@ def _rule_out(r: ScheduleRule, pin_map: "dict[int, Video] | None" = None) -> Sch
     return ScheduleRuleOut(
         id=r.id, name=r.name, day_of_week=r.day_of_week, hour=r.hour, minute=r.minute,
         account_id=r.account_id, is_active=r.is_active, preferred_effect=r.preferred_effect,
-        caption_template_id=r.caption_template_id, created_at=r.created_at,
+        caption_template_id=r.caption_template_id, prefer_source_caption=r.prefer_source_caption,
+        created_at=r.created_at,
         pinned_video_id=r.pinned_video_id,
         pinned_video_label=label, pinned_video_status=status,
     )

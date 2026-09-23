@@ -25,7 +25,7 @@ export interface Post {
 export interface ScheduleRule {
   id: number; name: string; day_of_week: number; hour: number; minute: number;
   account_id: number | null; is_active: boolean; preferred_effect: string | null;
-  caption_template_id: number | null; created_at?: string;
+  caption_template_id: number | null; prefer_source_caption: boolean; created_at?: string;
   pinned_video_id: number | null; pinned_video_label: string | null; pinned_video_status: string | null;
 }
 
