@@ -427,6 +427,9 @@ class TestResources:
         eid = r.json()["id"]
         assert c.post("/api/v1/effects", json={"name": "t1"}).status_code == 409
         assert c.put(f"/api/v1/effects/{eid}", json={"name": "t1", "description": "d2"}).status_code == 200
+        # Engagement rides the list payload live (computed, never stored).
+        rows = c.get("/api/v1/effects").json()
+        assert rows and all("avg_engagement" in e for e in rows)
         assert c.delete(f"/api/v1/effects/{eid}").status_code == 204
 
     def test_audio_upload_list_update_delete(self, client, tmp_path):

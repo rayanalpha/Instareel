@@ -30,7 +30,7 @@ def _audio_out(t: AudioTrack) -> AudioOut:
     return AudioOut(
         id=t.id, name=t.name, description=t.description, music_volume=t.music_volume,
         duck_original=t.duck_original, is_active=t.is_active, file_path=t.file_path,
-        duration=t.duration, use_count=t.use_count, avg_engagement=t.avg_engagement,
+        duration=t.duration, use_count=t.use_count,
     )
 
 
@@ -834,6 +834,10 @@ async def reset_proxies_now(request: Request, _: str = Depends(get_current_admin
 
 @effect_router.get("", response_model=list[EffectOut])
 async def list_effects(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import func
+
+    from app.models import Post, PostStatus, Video
+
     rows = (await db.execute(select(EffectPreset).order_by(EffectPreset.name))).scalars().all()
     # Top up any missing built-ins (covers both fresh DBs and servers seeded
     # with an older, smaller set) so the admin can just pick — no manual
@@ -846,7 +850,21 @@ async def list_effects(_: str = Depends(get_current_admin), db: AsyncSession = D
             db.add(EffectPreset(**preset))
         await db.commit()
         rows = (await db.execute(select(EffectPreset).order_by(EffectPreset.name))).scalars().all()
-    return [EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=e.avg_engagement) for e in rows]
+    # Engagement is computed live (one grouped query), not stored — the old
+    # column was never written, so every row showed NULL.
+    eng = {
+        (r[0] or ""): r[1]
+        for r in (
+            await db.execute(
+                select(Video.effect_preset, func.avg(Post.engagement_rate))
+                .join(Video, Video.id == Post.video_id)
+                .where(Post.status == PostStatus.posted, Video.effect_preset.is_not(None))
+                .group_by(Video.effect_preset)
+            )
+        ).all()
+    }
+    return [EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count,
+                      avg_engagement=round(float(eng.get(e.name) or 0), 2)) for e in rows]
 
 
 @effect_router.post("", response_model=EffectOut, status_code=201)
@@ -858,7 +876,7 @@ async def create_effect(body: EffectIn, _: str = Depends(get_current_admin), db:
     db.add(e)
     await db.commit()
     await db.refresh(e)
-    return EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=e.avg_engagement)
+    return EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=None)
 
 
 @effect_router.put("/{eid}", response_model=EffectOut)
@@ -870,7 +888,7 @@ async def update_effect(eid: int, body: EffectIn, _: str = Depends(get_current_a
         setattr(e, k, v)
     await db.commit()
     await db.refresh(e)
-    return EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=e.avg_engagement)
+    return EffectOut(id=e.id, name=e.name, description=e.description, ffmpeg_filter=e.ffmpeg_filter, is_active=e.is_active, use_count=e.use_count, avg_engagement=None)
 
 
 @effect_router.delete("/{eid}", status_code=204)

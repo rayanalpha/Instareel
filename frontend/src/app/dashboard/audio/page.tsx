@@ -53,7 +53,7 @@ export default function AudioPage() {
       <h1 className="text-xl font-extrabold tracking-tight">Trending audio</h1>
       <p className="text-sm text-zinc-500">
         Sounds mixed into processed videos (original audio kept at full volume plus the track at your level —
-        or the track alone when ducking is on). Picked automatically, least-used and best-performing first.
+        or the track alone when ducking is on). Picked automatically, least-used first.
       </p>
       <Card>
         <CardTitle>New track</CardTitle>

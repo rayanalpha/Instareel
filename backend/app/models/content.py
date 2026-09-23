@@ -40,7 +40,6 @@ class CaptionTemplate(Base, TimestampMixin):
     category: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class HashtagSet(Base, TimestampMixin):
@@ -76,7 +75,6 @@ class EffectPreset(Base, TimestampMixin):
     ffmpeg_filter: Mapped[str] = mapped_column(Text, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class AudioTrack(Base, TimestampMixin):
@@ -85,8 +83,8 @@ class AudioTrack(Base, TimestampMixin):
     The track's sound is baked into the file's audio stream — this is what
     viewers hear (and what drives retention). Note: this does NOT attach an
     official IG licensed-track attribution; that surface only exists in the
-    official app. Selection is data-driven: least-used + best-engagement
-    weighting in tasks.sync_helpers.pick_audio.
+    official app. Selection is least-used-first weighting in
+    tasks.sync_helpers.pick_audio.
     """
 
     __tablename__ = "audio_tracks"
@@ -101,7 +99,6 @@ class AudioTrack(Base, TimestampMixin):
     duck_original: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
-    avg_engagement: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class ProxySource(Base, TimestampMixin):

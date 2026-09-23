@@ -118,7 +118,31 @@ async def captions_breakdown(_: str = Depends(get_current_admin), db: AsyncSessi
     from app.models import CaptionTemplate
 
     templates = (await db.execute(select(CaptionTemplate))).scalars().all()
-    return [{"id": t.id, "name": t.name, "use_count": t.use_count, "avg_engagement": t.avg_engagement} for t in templates]
+    # Same approximation as /captions/{id}/performance: posts whose caption
+    # matches the template exactly. No stored column (it was never computed).
+    agg = {
+        (r[0] or ""): r[1:]
+        for r in (
+            await db.execute(
+                select(
+                    Post.caption,
+                    func.count(Post.id),
+                    func.avg(Post.engagement_rate),
+                    func.coalesce(func.sum(Post.views_7d), 0),
+                )
+                .where(Post.status == PostStatus.posted)
+                .group_by(Post.caption)
+            )
+        ).all()
+    }
+    out = []
+    for t in templates:
+        row = agg.get(t.content or "", (0, None, 0))
+        out.append({
+            "id": t.id, "name": t.name, "use_count": t.use_count,
+            "avg_engagement": round(float(row[1] or 0), 2),
+        })
+    return out
 
 
 @analytics_router.get("/time-slots")
@@ -187,7 +211,6 @@ async def clear_logs(
 DEFAULT_SETTINGS = {
     "auto_process_on_upload": ("true", "processing"),
     "post_jitter_minutes": ("5", "scheduler"),
-    "analytics_refresh_hours": ("4", "scheduler"),
     "pool_country": ("", "proxy"),
     "pool_require_country": ("false", "proxy"),
     "pool_purge_after_days": ("7", "proxy"),

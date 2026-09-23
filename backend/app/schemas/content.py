@@ -36,7 +36,8 @@ class CaptionIn(BaseModel):
 class CaptionOut(CaptionIn):
     id: int
     use_count: int
-    avg_engagement: float | None
+    # Computed live per request (exact-caption attribution) — never stored.
+    avg_engagement: float | None = None
 
 
 class HashtagSetIn(BaseModel):
@@ -94,7 +95,8 @@ class EffectIn(BaseModel):
 class EffectOut(EffectIn):
     id: int
     use_count: int
-    avg_engagement: float | None
+    # Computed live per request (effect_preset attribution) — never stored.
+    avg_engagement: float | None = None
 
 
 class AudioIn(BaseModel):
@@ -110,7 +112,6 @@ class AudioOut(AudioIn):
     file_path: str
     duration: float | None
     use_count: int
-    avg_engagement: float | None
 
 
 class ProxySourceIn(BaseModel):

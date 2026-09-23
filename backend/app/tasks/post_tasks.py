@@ -60,8 +60,14 @@ def check_and_post(self):
                     s, bool(rule.prefer_source_caption),
                     video.source_caption, rule.caption_template_id,
                 )
-                # Â±5 min jitter
-                when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=random.randint(-5, 5))
+                # Fire-time jitter comes from Settings (post_jitter_minutes),
+                # not a hardcoded constant — the toggle actually does something.
+                try:
+                    jitter = max(0, int(sched.get_setting(s, "post_jitter_minutes", "5")))
+                except (TypeError, ValueError):
+                    jitter = 5
+                when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+                    minutes=random.randint(-jitter, jitter))
                 s.add(
                     Post(
                         video_id=video.id,

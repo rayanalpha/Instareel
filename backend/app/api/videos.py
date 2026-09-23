@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin, get_db, limiter
 from app.config import settings
-from app.models import Post, PostStatus, Video, VideoStatus
+from app.models import Post, PostStatus, Setting, Video, VideoStatus
 from app.schemas.video import PostOut, SchedulePostIn, VideoOut, VideoSettingsUpdate
 from app.services import realtime
 from app.services.log_service import log_event
@@ -150,7 +150,15 @@ async def upload_video(
     await db.commit()
     await db.refresh(video)
     await log_event("INFO", "video", f"Uploaded {video.original_filename} (#{video.id})")
-    if settings.AUTO_PROCESS_ON_UPLOAD:
+    # The Settings-page toggle is the source of truth; the env default only
+    # applies before the row is ever seeded (fresh DBs seed on first /settings read).
+    auto_row = await db.get(Setting, "auto_process_on_upload")
+    auto_process = (
+        auto_row.value.strip().lower() == "true"
+        if auto_row and auto_row.value is not None
+        else settings.AUTO_PROCESS_ON_UPLOAD
+    )
+    if auto_process:
         from app.tasks.video_tasks import process_video_task
 
         process_video_task.delay(video.id)
@@ -206,7 +214,7 @@ async def delete_video(video_id: int, _: str = Depends(get_current_admin), db: A
 
 @router.post("/{video_id}/process")
 @limiter.limit("20/minute")
-async def trigger_process(request: Request, video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def trigger_process(request: Request, video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -216,12 +224,14 @@ async def trigger_process(request: Request, video_id: int, effect_filter: str = 
 
     # Flip to processing NOW so the dashboard shows progress immediately
     # instead of sitting on "uploaded" until the worker picks the task up.
+    # The effect always resolves from the video's saved effect_preset inside
+    # the task — there is no per-call override (nothing ever passed one).
     prev_status = v.status
     v.status = VideoStatus.processing
     v.failed_reason = None
     await db.commit()
     try:
-        process_video_task.delay(video_id, effect_filter)
+        process_video_task.delay(video_id, "")
     except Exception:
         # Broker unreachable: roll back so the video isn't wedged in
         # "processing" forever — the user can retry.
@@ -233,7 +243,7 @@ async def trigger_process(request: Request, video_id: int, effect_filter: str = 
 
 @router.post("/{video_id}/reprocess")
 @limiter.limit("20/minute")
-async def reprocess(request: Request, video_id: int, effect_filter: str = "", _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def reprocess(request: Request, video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
@@ -247,7 +257,7 @@ async def reprocess(request: Request, video_id: int, effect_filter: str = "", _:
     v.failed_reason = None
     await db.commit()
     try:
-        process_video_task.delay(video_id, effect_filter)
+        process_video_task.delay(video_id, "")
     except Exception:
         v.status = prev_status
         await db.commit()

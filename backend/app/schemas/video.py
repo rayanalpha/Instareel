@@ -63,4 +63,6 @@ class SchedulePostIn(BaseModel):
     caption: str = ""
     hashtags: str = ""
     is_trial: bool = False
-    trial_strategy: str = Field(default="manual", pattern="^(manual|auto)$")
+    # Omitted (None) = leave the video's saved strategy untouched. The old
+    # "manual" default silently overwrote a saved "auto" on every Post-now.
+    trial_strategy: str | None = Field(default=None, pattern="^(manual|auto)$")

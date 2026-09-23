@@ -1,16 +1,17 @@
 export interface Account {
-  id: number; username: string; proxy_id: number | null; status: string;
+  id: number; username: string; ig_user_id: string | null; proxy_id: number | null; status: string;
   last_login: string | null; last_post: string | null; posts_today: number;
   max_daily_posts: number; cooldown_until: string | null; total_posts: number;
   total_views: number; total_likes: number; notes: string | null; has_session?: boolean;
+  created_at: string; updated_at: string;
 }
 
 export interface Video {
   id: number; original_filename: string; duration: number | null; file_size: number | null;
   status: string; effect_preset: string | null; audio_track: string | null; is_trial: boolean;
-  trial_strategy: string;
+  trial_strategy: string; custom_filters: string | null;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
-  source_caption: string | null;
+  source_caption: string | null; custom_thumbnail_path: string | null;
   processed_at: string | null; thumbnail_path: string | null; created_at: string;
 }
 
@@ -33,7 +34,7 @@ export interface Caption { id: number; name: string; content: string; category: 
 export interface HashtagSet { id: number; name: string; tags: string; is_active: boolean; use_count: number; }
 export interface Bio { id: number; account_id: number; text: string; link_url: string; full_name: string; make_private: boolean | null; profile_pic_path: string | null; has_picture: boolean; last_applied: string | null; }
 export interface IgProfile { username: string; full_name: string; biography: string; external_url: string; is_private: boolean; profile_pic_url: string; follower_count: number | null; following_count: number | null; media_count: number | null; }
-export interface Proxy { id: number; url: string; protocol: string; username: string | null; country: string | null; is_healthy: boolean; last_checked: string | null; fail_count: number; latency_ms: number | null; last_error: string | null; source: string | null; is_active: boolean; }
+export interface Proxy { id: number; url: string; protocol: string; username: string | null; country: string | null; is_healthy: boolean; last_checked: string | null; fail_count: number; latency_ms: number | null; last_error: string | null; source: string | null; is_active: boolean; created_at: string; }
 export interface ProxyImportResult { added: number; duplicates_skipped: number; errors: { line: number; text: string; reason: string }[]; }
 export interface ProxySource { id: number; name: string; url: string; default_protocol: string; default_country: string; is_active: boolean; last_fetch_at: string | null; last_added: number; last_total: number; }
 export interface VideoSource {
@@ -52,7 +53,7 @@ export interface SourceItem {
   video_id: number | null; error: string | null; created_at: string;
 }
 export interface Effect { id: number; name: string; description: string; ffmpeg_filter: string; is_active: boolean; use_count: number; avg_engagement: number | null; }
-export interface AudioTrack { id: number; name: string; description: string; file_path: string; duration: number | null; music_volume: number; duck_original: boolean; is_active: boolean; use_count: number; avg_engagement: number | null; }
+export interface AudioTrack { id: number; name: string; description: string; file_path: string; duration: number | null; music_volume: number; duck_original: boolean; is_active: boolean; use_count: number; }
 export interface AudioStats { id: number; name: string; posts: number; avg_engagement: number; views: number; use_count: number; is_active: boolean; }
 export interface LogEntry { id: number; level: string; category: string; message: string; details: Record<string, unknown> | null; timestamp: string; }
 export interface Setting { key: string; value: string; category: string; is_sensitive: boolean; }

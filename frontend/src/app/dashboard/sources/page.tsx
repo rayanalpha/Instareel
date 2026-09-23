@@ -110,8 +110,9 @@ function ItemsView({ sourceId }: { sourceId: number }) {
   );
 }
 
-function EditForm({ src, onDone }: { src: VideoSource; onDone: () => void }) {
+function EditForm({ src, accounts, onDone }: { src: VideoSource; accounts: Account[]; onDone: () => void }) {
   const update = useApiMutation("put", [["video-sources"]], "Source updated");
+  const [acct, setAcct] = useState(src.account_id ? String(src.account_id) : "");
   const [maxItems, setMaxItems] = useState(src.max_items);
   const [dMin, setDMin] = useState(src.delay_min_s);
   const [dMax, setDMax] = useState(src.delay_max_s);
@@ -126,6 +127,7 @@ function EditForm({ src, onDone }: { src: VideoSource; onDone: () => void }) {
     await update.mutateAsync({
       url: `/sources/${src.id}`,
       body: {
+        account_id: acct ? Number(acct) : null,
         max_items: maxItems, delay_min_s: dMin, delay_max_s: dMax,
         reels_only: reelsOnly, with_covers: withCovers, auto_process: autoProcess,
       },
@@ -147,6 +149,14 @@ function EditForm({ src, onDone }: { src: VideoSource; onDone: () => void }) {
         </Field>
       </div>
       <div className="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs">
+        <label className="flex items-center gap-1.5">Download account:
+          <select className="input !w-auto !py-1" value={acct} onChange={(e) => setAcct(e.target.value)}>
+            <option value="">Auto</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>@{a.username}{a.has_session ? " ✓" : ""}</option>
+            ))}
+          </select>
+        </label>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={reelsOnly} onChange={(e) => setReelsOnly(e.target.checked)} /> Reels only</label>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={withCovers} onChange={(e) => setWithCovers(e.target.checked)} /> With covers</label>
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={autoProcess} onChange={(e) => setAutoProcess(e.target.checked)} /> Auto-process</label>
@@ -317,7 +327,7 @@ export default function SourcesPage() {
                 </p>
                 {s.current_stage && <p title={s.current_stage} className="mt-0.5 min-w-0 max-w-full truncate text-xs text-zinc-500">{s.current_stage}</p>}
                 {s.last_error && <p title={s.last_error} className="mt-0.5 min-w-0 max-w-full break-all text-xs text-red-500">{s.last_error}</p>}
-                {editing === s.id && !busy && <EditForm src={s} onDone={() => setEditing(null)} />}
+                {editing === s.id && !busy && <EditForm src={s} accounts={((accounts ?? []) as Account[])} onDone={() => setEditing(null)} />}
                 {expanded === s.id && <ItemsView sourceId={s.id} />}
               </Card>
             );

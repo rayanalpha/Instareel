@@ -183,8 +183,9 @@ async def calendar(_: str = Depends(get_current_admin), db: AsyncSession = Depen
             sel(Post).where(Post.status == PostStatus.scheduled).order_by(Post.scheduled_for.asc()).limit(200)
         )
     ).scalars().all()
+    pins = await _pin_map(db, list(rules))
     return {
-        "rules": [_rule_out(r).model_dump() for r in rules],
+        "rules": [_rule_out(r, pins).model_dump() for r in rules],
         "upcoming": [{"id": p.id, "account_id": p.account_id, "scheduled_for": p.scheduled_for} for p in upcoming],
     }
 
@@ -193,8 +194,25 @@ async def calendar(_: str = Depends(get_current_admin), db: AsyncSession = Depen
 
 @caption_router.get("", response_model=list[CaptionOut])
 async def list_captions(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import func
+
+    from app.models import Post, PostStatus
+
     rows = (await db.execute(select(CaptionTemplate).order_by(CaptionTemplate.name))).scalars().all()
-    return [CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count, avg_engagement=c.avg_engagement) for c in rows]
+    # Engagement computed live (same exact-caption approximation as
+    # /{cid}/performance) — the old stored column was never written.
+    eng = {
+        (r[0] or ""): r[1]
+        for r in (
+            await db.execute(
+                select(Post.caption, func.avg(Post.engagement_rate))
+                .where(Post.status == PostStatus.posted)
+                .group_by(Post.caption)
+            )
+        ).all()
+    }
+    return [CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count,
+                       avg_engagement=round(float(eng.get(c.content or "") or 0), 2)) for c in rows]
 
 
 @caption_router.post("", response_model=CaptionOut, status_code=201)
@@ -203,7 +221,7 @@ async def create_caption(body: CaptionIn, _: str = Depends(get_current_admin), d
     db.add(c)
     await db.commit()
     await db.refresh(c)
-    return CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count, avg_engagement=c.avg_engagement)
+    return CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count)
 
 
 @caption_router.put("/{cid}", response_model=CaptionOut)
@@ -215,7 +233,7 @@ async def update_caption(cid: int, body: CaptionIn, _: str = Depends(get_current
         setattr(c, k, v)
     await db.commit()
     await db.refresh(c)
-    return CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count, avg_engagement=c.avg_engagement)
+    return CaptionOut(id=c.id, name=c.name, content=c.content, category=c.category, is_active=c.is_active, use_count=c.use_count)
 
 
 @caption_router.delete("/{cid}", status_code=204)

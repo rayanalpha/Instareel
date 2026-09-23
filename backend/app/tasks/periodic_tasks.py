@@ -87,14 +87,8 @@ def fetch_all_analytics():
                 with SyncSessionLocal() as s:
                     p = s.get(Post, pid)
                     if p:
-                        if age_h <= 1.5:
-                            p.views_1h, p.likes_1h = views, likes
-                        if age_h <= 8:
-                            p.views_6h = views
                         if age_h <= 30:
-                            p.views_24h, p.likes_24h, p.comments_24h = views, likes, comments
-                        if age_h <= 54:
-                            p.views_48h = views
+                            p.views_24h, p.likes_24h, p.comments_7d = views, likes, comments
                         p.views_7d, p.likes_7d, p.comments_7d = views, likes, comments
                         p.engagement_rate = eng
                         p.last_analytics_check = dt.datetime.now(dt.timezone.utc)

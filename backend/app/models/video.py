@@ -41,9 +41,8 @@ class Video(Base, TimestampMixin):
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[VideoStatus] = mapped_column(Enum(VideoStatus), default=VideoStatus.uploaded)
-    upload_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Original caption from a video source (IG page ingest) — kept for
-    # reference/reuse; Post captions still come from templates at schedule.
+    # Original caption from a video source (IG page ingest) — posted verbatim
+    # when the firing schedule rule prefers source captions.
     source_caption: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     effect_preset: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -76,15 +75,10 @@ class Post(Base, TimestampMixin):
     scheduled_for: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     posted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    views_1h: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    views_6h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     views_24h: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    views_48h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     views_7d: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    likes_1h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     likes_24h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     likes_7d: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    comments_24h: Mapped[int | None] = mapped_column(Integer, nullable=True)
     comments_7d: Mapped[int | None] = mapped_column(Integer, nullable=True)
     engagement_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_analytics_check: Mapped[dt.datetime | None] = mapped_column(
