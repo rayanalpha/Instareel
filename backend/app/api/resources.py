@@ -97,7 +97,10 @@ async def ensure_bio(body: dict, _: str = Depends(get_current_admin), db: AsyncS
 
     No rotation anymore: one account = one config, every section optional
     and applied independently."""
-    acc = await db.get(Account, body.get("account_id"))
+    raw_aid = body.get("account_id")
+    if isinstance(raw_aid, bool) or not isinstance(raw_aid, int):
+        raise HTTPException(400, "account_id is required")
+    acc = await db.get(Account, raw_aid)
     if not acc:
         raise HTTPException(404, "Account not found")
     row = (await db.execute(select(BioConfig).where(BioConfig.account_id == acc.id))).scalars().first()
@@ -642,7 +645,7 @@ async def test_proxy(pid: int, _: str = Depends(get_current_admin), db: AsyncSes
     p.is_healthy = ok
     p.latency_ms = latency
     p.last_checked = dt2.datetime.now(dt2.timezone.utc)
-    p.fail_count = 0 if ok else p.fail_count + 1
+    p.fail_count = 0 if ok else (p.fail_count or 0) + 1
     await db.commit()
     import asyncio
 

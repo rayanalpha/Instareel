@@ -186,7 +186,6 @@ async def clear_logs(
 
 DEFAULT_SETTINGS = {
     "auto_process_on_upload": ("true", "processing"),
-    "default_effect": ("", "processing"),
     "post_jitter_minutes": ("5", "scheduler"),
     "analytics_refresh_hours": ("4", "scheduler"),
     "pool_country": ("", "proxy"),
@@ -195,7 +194,7 @@ DEFAULT_SETTINGS = {
     "pool_stillborn_hours": ("48", "proxy"),
 }
 
-MASKED = "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+MASKED = "••••••••"
 
 
 @settings_router.get("", response_model=list[SettingOut])

@@ -112,7 +112,8 @@ export function useApiMutation(method: "post" | "put" | "delete", invalidate: st
   return useMutation({
     mutationFn: async ({ url, body }: { url: string; body?: unknown }) => {
       // Instagram-facing endpoints can take minutes; don't let axios kill the request at 30s.
-      const { data } = await api.request({ method, url, data: body, timeout: 180000 });
+      // 200s beats the longest backend wait (180s) with margin, still under nginx's 300s.
+      const { data } = await api.request({ method, url, data: body, timeout: 200000 });
       return data;
     },
     onSuccess: (data) => {

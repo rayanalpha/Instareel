@@ -129,6 +129,7 @@ def execute_post(self, post_id: int):
                 return
             now = dt.datetime.now(dt.timezone.utc)
             note = ""
+            kind = ""
             if ok:
                 account.last_post = now
                 account.posts_today += 1
@@ -157,9 +158,15 @@ def execute_post(self, post_id: int):
                     else:
                         note = f" — no spare proxy, cooldown {hours}h"
             username = account.username
+            account_id = account.id
+            status_changed = kind in ("challenge", "throttled")
+            new_status = account.status
             s.commit()
             if note:
                 log_event_sync("WARNING", "account", f"Account @{username} throttled{note}")
+            if status_changed:
+                publish_sync("account_status_change",
+                             {"account_id": account_id, "status": new_status.value})
 
     try:
         # Single-flight claim: concurrent workers, beat redelivery and celery

@@ -189,7 +189,8 @@ async def check_proxy(proxy) -> tuple[bool, int | None]:
     import httpx
 
     url = proxy_url_for(proxy) or proxy.url
-    ok, tcp_ms = _tcp_check(url)
+    # Blocking socket (up to 10s) — keep it off the event loop.
+    ok, tcp_ms = await asyncio.to_thread(_tcp_check, url)
     if not ok:
         log.info("Proxy %s unhealthy: TCP connect failed", proxy.id)
         return False, None

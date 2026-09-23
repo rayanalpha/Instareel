@@ -98,7 +98,6 @@ services:
       - "${NGINX_PORT:-8080}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./media:/srv/media:ro
     depends_on:
       - backend
       - frontend

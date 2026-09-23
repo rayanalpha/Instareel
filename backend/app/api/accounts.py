@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin, limiter
 from app.core.security import decrypt_secret, encrypt_secret
-from app.models import Account, AccountStatus, Post, PostStatus
+from app.models import Account, AccountStatus, Post, PostStatus, Proxy
 from app.schemas.account import AccountCreate, AccountOut, AccountUpdate
 from app.services.log_service import log_event
 
@@ -91,6 +91,8 @@ async def create_account(body: AccountCreate, _: str = Depends(get_current_admin
     exists = (await db.execute(select(Account).where(Account.username == body.username))).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "Account already exists")
+    if body.proxy_id is not None and await db.get(Proxy, body.proxy_id) is None:
+        raise HTTPException(404, "Proxy not found")
     acc = Account(
         username=body.username,
         password_enc=encrypt_secret(body.password),
@@ -123,7 +125,13 @@ async def update_account(account_id: int, body: AccountUpdate, _: str = Depends(
         if body.proxy_id == "none":
             acc.proxy_id = None
         else:
-            acc.proxy_id = int(body.proxy_id)
+            try:
+                pid = int(body.proxy_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Invalid proxy_id")
+            if await db.get(Proxy, pid) is None:
+                raise HTTPException(404, "Proxy not found")
+            acc.proxy_id = pid
     if body.max_daily_posts is not None:
         acc.max_daily_posts = body.max_daily_posts
     if body.notes is not None:
@@ -192,7 +200,6 @@ async def force_login(
     import concurrent.futures
 
     from app.config import settings
-    from app.models import Proxy
     from app.services.proxy_service import proxy_url_for
     from app.utils.instagram_helpers import session_path_for
 
@@ -203,8 +210,12 @@ async def force_login(
     username, password = acc.username, decrypt_secret(acc.password_enc)
     purl = proxy_url_for(proxy) if proxy else None
     spath = session_path_for(username, settings.MEDIA_ROOT)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        ok, detail = pool.submit(_blocking_login, username, password, purl, spath).result(timeout=180)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            ok, detail = pool.submit(_blocking_login, username, password, purl, spath).result(timeout=180)
+    except concurrent.futures.TimeoutError:
+        await log_event("ERROR", "account", f"Manual login timed out for @{username}")
+        raise HTTPException(504, "Login timed out after 180s — the route to Instagram stalled")
     acc = await db.get(Account, account_id)
     if acc:
         if ok:
@@ -214,6 +225,14 @@ async def force_login(
         elif detail.startswith("challenge"):
             acc.status = AccountStatus.challenge_required
         await db.commit()
+        import asyncio
+
+        from app.tasks.sync_helpers import publish_sync
+
+        await asyncio.to_thread(
+            publish_sync, "account_status_change",
+            {"account_id": acc.id, "status": acc.status.value},
+        )
     await log_event("INFO" if ok else "WARNING", "account", f"Manual login @{username}: {detail}")
     return {"ok": ok, "detail": detail}
 
@@ -227,7 +246,6 @@ async def test_session(
     import concurrent.futures
 
     from app.config import settings
-    from app.models import Proxy
     from app.services.instagram_service import InstagramService
     from app.services.proxy_service import proxy_url_for
     from app.utils.instagram_helpers import session_path_for
@@ -239,10 +257,13 @@ async def test_session(
     username = acc.username
     purl = proxy_url_for(proxy) if proxy else None
     spath = acc.session_file_path or session_path_for(username, settings.MEDIA_ROOT)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        valid, reason = pool.submit(
-            InstagramService(proxy_url=purl, session_path=spath).check_session, username
-        ).result(timeout=120)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            valid, reason = pool.submit(
+                InstagramService(proxy_url=purl, session_path=spath).check_session, username
+            ).result(timeout=120)
+    except concurrent.futures.TimeoutError:
+        return {"valid": False, "detail": "Session check timed out after 120s — the route to Instagram stalled"}
     return {"valid": valid, "detail": "Session is valid" if valid else f"Session invalid — {reason}"}
 
 
@@ -349,6 +370,14 @@ async def set_cooldown(
     acc.status = AccountStatus.cooldown
     acc.cooldown_until = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=hours)
     await db.commit()
+    import asyncio
+
+    from app.tasks.sync_helpers import publish_sync
+
+    await asyncio.to_thread(
+        publish_sync, "account_status_change",
+        {"account_id": acc.id, "status": acc.status.value},
+    )
     return {"ok": True}
 
 
@@ -363,6 +392,14 @@ async def activate(
     acc.status = AccountStatus.active
     acc.cooldown_until = None
     await db.commit()
+    import asyncio
+
+    from app.tasks.sync_helpers import publish_sync
+
+    await asyncio.to_thread(
+        publish_sync, "account_status_change",
+        {"account_id": acc.id, "status": acc.status.value},
+    )
     return {"ok": True}
 
 

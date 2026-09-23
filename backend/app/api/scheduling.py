@@ -147,7 +147,8 @@ async def pin_rule(rule_id: int, body: dict, _: str = Depends(get_current_admin)
     if not r:
         raise HTTPException(404, "Rule not found")
     video_id = body.get("video_id")
-    if not isinstance(video_id, int):
+    # bool is a subclass of int — {"video_id": true} must not look up video 1.
+    if isinstance(video_id, bool) or not isinstance(video_id, int):
         raise HTTPException(422, "video_id is required")
     await _validate_pin(db, video_id, exclude_rule_id=rule_id)
     r.pinned_video_id = video_id

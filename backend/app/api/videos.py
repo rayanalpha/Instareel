@@ -216,10 +216,18 @@ async def trigger_process(request: Request, video_id: int, effect_filter: str = 
 
     # Flip to processing NOW so the dashboard shows progress immediately
     # instead of sitting on "uploaded" until the worker picks the task up.
+    prev_status = v.status
     v.status = VideoStatus.processing
     v.failed_reason = None
     await db.commit()
-    process_video_task.delay(video_id, effect_filter)
+    try:
+        process_video_task.delay(video_id, effect_filter)
+    except Exception:
+        # Broker unreachable: roll back so the video isn't wedged in
+        # "processing" forever — the user can retry.
+        v.status = prev_status
+        await db.commit()
+        raise HTTPException(503, "Task queue unreachable — the worker may be down, try again in a moment")
     return {"queued": True}
 
 
@@ -234,10 +242,16 @@ async def reprocess(request: Request, video_id: int, effect_filter: str = "", _:
     from app.tasks.video_tasks import process_video_task
 
     # Same immediate flip as trigger_process: the UI polls on status.
+    prev_status = v.status
     v.status = VideoStatus.processing
     v.failed_reason = None
     await db.commit()
-    process_video_task.delay(video_id, effect_filter)
+    try:
+        process_video_task.delay(video_id, effect_filter)
+    except Exception:
+        v.status = prev_status
+        await db.commit()
+        raise HTTPException(503, "Task queue unreachable — the worker may be down, try again in a moment")
     return {"queued": True}
 
 
@@ -347,6 +361,8 @@ async def upload_thumbnail(
                 raise HTTPException(422, "File is not a valid image (ffmpeg conversion failed)")
     except HTTPException:
         raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "Thumbnail conversion timed out after 60s")
     except Exception as exc:
         raise HTTPException(400, f"Thumbnail upload failed: {exc}")
     finally:

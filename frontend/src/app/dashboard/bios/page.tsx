@@ -147,7 +147,9 @@ export default function BiosPage() {
     if (!bio) return;
     setLoadingCurrent(true);
     try {
-      const { data } = await api.get(`/bios/${bio.id}/current`);
+      // Live IG read can take up to 120s server-side — the global 30s
+      // axios default would abort it with a false failure.
+      const { data } = await api.get(`/bios/${bio.id}/current`, { timeout: 150000 });
       setCurrent(data as IgProfile);
     } catch {
       setCurrent(null);

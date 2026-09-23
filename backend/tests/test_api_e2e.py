@@ -146,6 +146,13 @@ class TestAccounts:
         c.post("/api/v1/accounts", json={"username": "dup", "password": "pw"})
         assert c.post("/api/v1/accounts", json={"username": "dup", "password": "pw"}).status_code == 409
 
+    def test_proxy_id_guards(self, client):
+        c, _, _ = client
+        assert c.post("/api/v1/accounts", json={"username": "px", "password": "pw", "proxy_id": 9999}).status_code == 404
+        aid = c.post("/api/v1/accounts", json={"username": "px", "password": "pw"}).json()["id"]
+        assert c.put(f"/api/v1/accounts/{aid}", json={"proxy_id": "abc"}).status_code == 400
+        assert c.put(f"/api/v1/accounts/{aid}", json={"proxy_id": 9999}).status_code == 404
+
     def test_session_upload_roundtrip(self, client):
         c, _, _ = client
         aid = c.post("/api/v1/accounts", json={"username": "sess", "password": "pw"}).json()["id"]
@@ -233,6 +240,8 @@ class TestVideos:
         # Invalid trim pair rejected.
         bad = c.put(f"/api/v1/videos/{vid}/settings", json={"trim_start": 5, "trim_end": 2})
         assert bad.status_code == 400
+        # Negative trims rejected (schema ge=0 → 422).
+        assert c.put(f"/api/v1/videos/{vid}/settings", json={"trim_start": -1}).status_code == 422
         # Dangerous filter metachars rejected.
         bad2 = c.put(f"/api/v1/videos/{vid}/settings", json={"custom_filters": "eq=1;rm -rf"})
         assert bad2.status_code == 400
@@ -441,6 +450,7 @@ class TestResources:
         monkeypatch.setattr(app.database, "SyncSessionLocal", sessionmaker(bind=sync_engine))
         acc = c.post("/api/v1/accounts", json={"username": "s1", "password": "pw"}).json()["id"]
         assert c.post("/api/v1/bios/ensure", json={"account_id": 999}).status_code == 404
+        assert c.post("/api/v1/bios/ensure", json={}).status_code == 400
         b1 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
         assert b1["text"] == "" and b1["account_id"] == acc
         b2 = c.post("/api/v1/bios/ensure", json={"account_id": acc}).json()
@@ -594,6 +604,8 @@ class TestResources:
         assert c.post(f"/api/v1/schedule/{r2}/pin", json={"video_id": va}).status_code == 422
         assert c.post(f"/api/v1/schedule/{rid}/pin", json={"video_id": 999999}).status_code == 404
         assert c.post(f"/api/v1/schedule/{rid}/pin", json={}).status_code == 422
+        # bool is not a valid video id (bool subclasses int — must not resolve video 1).
+        assert c.post(f"/api/v1/schedule/{rid}/pin", json={"video_id": True}).status_code == 422
         assert c.post("/api/v1/schedule/999999/pin", json={"video_id": va}).status_code == 404
         # Queued videos can't be pinned.
         assert c.post("/api/v1/posts/schedule",
