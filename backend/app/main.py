@@ -47,7 +47,7 @@ async def startup():
             "otherwise forged admin JWTs are trivial."
         )
     os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
-    for sub in ("raw", "processed", "thumbnails", "watermarks", "sessions", "audio", "profile_pics"):
+    for sub in ("raw", "processed", "thumbnails", "sessions", "audio", "profile_pics"):
         os.makedirs(os.path.join(settings.MEDIA_ROOT, sub), exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

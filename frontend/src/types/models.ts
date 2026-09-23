@@ -8,7 +8,7 @@ export interface Account {
 export interface Video {
   id: number; original_filename: string; duration: number | null; file_size: number | null;
   status: string; effect_preset: string | null; audio_track: string | null; is_trial: boolean;
-  trial_strategy: string; add_watermark: boolean;
+  trial_strategy: string;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
   source_caption: string | null;
   processed_at: string | null; thumbnail_path: string | null; created_at: string;

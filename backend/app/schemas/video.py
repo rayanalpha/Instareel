@@ -14,7 +14,6 @@ class VideoOut(BaseModel):
     custom_filters: str | None
     is_trial: bool
     trial_strategy: str
-    add_watermark: bool
     trim_start: float | None
     trim_end: float | None
     failed_reason: str | None
@@ -33,7 +32,6 @@ class VideoSettingsUpdate(BaseModel):
     trim_end: float | None = Field(default=None, ge=0)
     is_trial: bool | None = None
     trial_strategy: str | None = Field(default=None, pattern="^(manual|auto)$")
-    add_watermark: bool | None = None
 
 
 class PostOut(BaseModel):

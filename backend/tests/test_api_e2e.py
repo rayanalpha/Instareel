@@ -195,7 +195,7 @@ class TestVideos:
         assert bad2.status_code == 400
         ok = c.put(f"/api/v1/videos/{vid}/settings",
                    json={"effect_preset": "clean_natural", "audio_track": None,
-                         "trim_start": 0.5, "trim_end": 3.0, "add_watermark": True})
+                         "trim_start": 0.5, "trim_end": 3.0})
         assert ok.status_code == 200, ok.text
         body = ok.json()
         assert body["effect_preset"] == "clean_natural" and body["trim_start"] == 0.5

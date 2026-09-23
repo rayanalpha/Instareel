@@ -1,7 +1,7 @@
 """Real FFmpeg end-to-end: generate fixtures, encode, probe outputs.
 
 Slow-ish by design (each encode is seconds) — this is the suite that proves
-every shipped effect preset, the trending-audio mixer, watermarks, trims and
+every shipped effect preset, the trending-audio mixer, trims and
 thumbnails against the real encoder, not string matching.
 """
 import json
@@ -35,11 +35,7 @@ def media(tmp_path_factory):
     _run(["ffmpeg", "-y", "-v", "error",
           "-f", "lavfi", "-i", "sine=frequency=880:duration=6",
           "-c:a", "pcm_s16le", music])
-    wm = str(d / "wm.png")
-    from PIL import Image
-
-    Image.new("RGB", (120, 60), (10, 200, 90)).save(wm)
-    return {"dir": str(d), "src": src, "silent": silent, "music": music, "wm": wm}
+    return {"dir": str(d), "src": src, "silent": silent, "music": music}
 
 
 def _probe(path):
@@ -62,7 +58,7 @@ class TestProbe:
         assert 3.5 < info["duration"] < 4.5
 
 
-class TestPlainAndWatermark:
+class TestPlainEncode:
     def test_plain_encode(self, media, tmp_path):
         dst = str(tmp_path / "plain.mp4")
         ff.run_sync_with_progress(
@@ -71,12 +67,6 @@ class TestPlainAndWatermark:
         ss = _streams(info)
         assert (ss["video"]["width"], ss["video"]["height"]) == (720, 1280)
         assert "audio" in ss
-
-    def test_watermark_encode(self, media, tmp_path):
-        dst = str(tmp_path / "wm.mp4")
-        ff.run_sync_with_progress(
-            ff.build_command(media["src"], dst, watermark_path=media["wm"]), 4.0, lambda *a: None)
-        assert _streams(_probe(dst))["video"]["width"] == 720
 
     def test_progress_monotonic(self, media, tmp_path):
         seen = []

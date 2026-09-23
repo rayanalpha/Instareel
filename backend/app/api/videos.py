@@ -29,7 +29,6 @@ def _out(v: Video) -> VideoOut:
         id=v.id, original_filename=v.original_filename, duration=v.duration, file_size=v.file_size,
         status=v.status.value, effect_preset=v.effect_preset, audio_track=v.audio_track,
         custom_filters=v.custom_filters, is_trial=v.is_trial, trial_strategy=v.trial_strategy,
-        add_watermark=v.add_watermark,
         trim_start=v.trim_start, trim_end=v.trim_end, failed_reason=v.failed_reason,
         source_caption=v.source_caption,
         processed_at=v.processed_at, thumbnail_path=v.thumbnail_path,
@@ -262,7 +261,7 @@ async def update_settings(video_id: int, body: VideoSettingsUpdate, _: str = Dep
         # Filtergraph metacharacters would break out of [0:v]...[outv].
         raise HTTPException(400, "custom_filters must be a plain comma chain (no ; [ ])")
     for field in ("effect_preset", "audio_track", "custom_filters", "trim_start", "trim_end",
-                    "is_trial", "trial_strategy", "add_watermark"):
+                    "is_trial", "trial_strategy"):
         val = getattr(body, field)
         if val is not None:
             setattr(v, field, val)

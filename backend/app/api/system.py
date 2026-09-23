@@ -187,7 +187,6 @@ async def clear_logs(
 DEFAULT_SETTINGS = {
     "auto_process_on_upload": ("true", "processing"),
     "default_effect": ("", "processing"),
-    "watermark_enabled": ("true", "processing"),
     "post_jitter_minutes": ("5", "scheduler"),
     "analytics_refresh_hours": ("4", "scheduler"),
     "pool_country": ("", "proxy"),

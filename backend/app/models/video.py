@@ -56,7 +56,6 @@ class Video(Base, TimestampMixin):
     custom_filters: Mapped[str | None] = mapped_column(Text, nullable=True)
     trim_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     trim_end: Mapped[float | None] = mapped_column(Float, nullable=True)
-    add_watermark: Mapped[bool] = mapped_column(Boolean, default=True)
 
     processed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

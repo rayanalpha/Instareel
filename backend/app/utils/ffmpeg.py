@@ -58,10 +58,9 @@ def build_filter(
     effect_filter: str = "",
     custom_filters: str = "",
     color_grade: str = "",
-    watermark_path: str | None = None,
     has_audio: bool = True,
-) -> tuple[str, bool]:
-    """Return (filter_complex, needs_watermark_input)."""
+) -> str:
+    """Return the video filter_complex (single input, [outv] output)."""
     parts: list[str] = []
     # Center-crop to 9:16 then scale to 720x1280.
     parts.append(
@@ -77,15 +76,7 @@ def build_filter(
         parts.append(custom_filters.strip())
     parts.append("format=yuv420p")
     video_chain = ",".join(p for p in parts if p)
-    if watermark_path:
-        # [0:v]<chain>[v]; [1:v]scale=120:-1[wm]; [v][wm]overlay=W-w-20:20
-        fc = (
-            f"[0:v]{video_chain}[v];"
-            f"[1:v]scale=120:-1[wm];"
-            f"[v][wm]overlay=W-w-20:20[outv]"
-        )
-        return fc, True
-    return f"[0:v]{video_chain}[outv]", False
+    return f"[0:v]{video_chain}[outv]"
 
 
 def build_command(
@@ -96,7 +87,6 @@ def build_command(
     effect_filter: str = "",
     custom_filters: str = "",
     color_grade: str = "",
-    watermark_path: str | None = None,
     has_audio: bool = True,
     trending_audio: str | None = None,
     music_volume: float = 0.4,
@@ -111,9 +101,8 @@ def build_command(
       trending track becomes the only audio (at ``music_volume``).
     - no trending file: previous behavior is unchanged.
     """
-    filter_complex, needs_wm = build_filter(
+    filter_complex = build_filter(
         effect_filter, custom_filters, color_grade,
-        watermark_path if watermark_path and os.path.exists(watermark_path) else None,
         has_audio,
     )
     music = trending_audio if trending_audio and os.path.exists(trending_audio) else None
@@ -129,9 +118,6 @@ def build_command(
         cmd += ["-t", str(trim_end)]
     cmd += ["-i", src]
     next_idx = 1
-    if needs_wm:
-        cmd += ["-i", watermark_path]
-        next_idx += 1
     music_idx: int | None = None
     if music:
         if loop_audio_to and loop_audio_to > 0:

@@ -9,7 +9,7 @@ import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
 interface Detail {
   id: number; original_filename: string; duration: number | null; status: string;
   effect_preset: string | null; audio_track: string | null; is_trial: boolean;
-  trial_strategy: string; add_watermark: boolean;
+  trial_strategy: string;
   trim_start: number | null; trim_end: number | null; failed_reason: string | null;
   source_caption: string | null;
   custom_thumbnail_path: string | null;
@@ -26,7 +26,7 @@ export default function VideoDetailPage() {
   const [previewError, setPreviewError] = useState("");
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [thumbBusy, setThumbBusy] = useState(false);
-  const [form, setForm] = useState({ effect_preset: "", audio_track: "", is_trial: false, trial_strategy: "manual", trim_start: "", trim_end: "", add_watermark: true });
+  const [form, setForm] = useState({ effect_preset: "", audio_track: "", is_trial: false, trial_strategy: "manual", trim_start: "", trim_end: "" });
   const { data: effects } = useEffects();
   const { data: audios } = useAudios();
   const save = useApiMutation("put", [["videos"]]);
@@ -48,7 +48,6 @@ export default function VideoDetailPage() {
       trial_strategy: data.trial_strategy ?? "manual",
       trim_start: data.trim_start?.toString() ?? "",
       trim_end: data.trim_end?.toString() ?? "",
-      add_watermark: data.add_watermark,
     });
     try {
       const s = await api.get(`/videos/${id}/status`);
@@ -232,17 +231,16 @@ export default function VideoDetailPage() {
         </div>
         {previewUrl ? (
           <LivePreview
-            key={`${video.status}-${form.effect_preset}-${form.add_watermark}`}
+            key={`${video.status}-${form.effect_preset}`}
             src={previewUrl}
             effectName={form.effect_preset}
-            watermark={form.add_watermark}
           />
         ) : (
           <div className="flex aspect-[9/16] max-h-[560px] items-center justify-center rounded-lg bg-zinc-100 text-sm text-zinc-500 dark:bg-zinc-800">
             {previewError || "Loading preview…"}
           </div>
         )}
-        <p className="mt-2 text-xs text-zinc-500">Preview shows the selected effect (CSS approximation) and watermark overlay live.</p>
+        <p className="mt-2 text-xs text-zinc-500">Preview shows the selected effect (CSS approximation).</p>
         <div className="mt-3 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
           <div className="flex items-center gap-2">
             {thumbUrl ? (
@@ -347,10 +345,6 @@ export default function VideoDetailPage() {
               <input className="input" type="number" min={0} step={0.5} value={form.trim_end} onChange={(e) => setForm({ ...form, trim_end: e.target.value })} />
             </Field>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.add_watermark} onChange={(e) => setForm({ ...form, add_watermark: e.target.checked })} />
-            Add watermark overlay
-          </label>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.is_trial} onChange={(e) => setForm({ ...form, is_trial: e.target.checked })} />
@@ -379,7 +373,6 @@ export default function VideoDetailPage() {
                       trial_strategy: form.trial_strategy,
                       trim_start: form.trim_start ? Number(form.trim_start) : null,
                       trim_end: form.trim_end ? Number(form.trim_end) : null,
-                      add_watermark: form.add_watermark,
                     },
                   });
                   load();

@@ -44,19 +44,14 @@ class TestDeviceSettings:
 
 class TestFfmpegBuilder:
     def test_crop_scale_chain_always_present(self):
-        fc, needs_wm = build_filter()
+        fc = build_filter()
         assert "crop=ih*9/16" in fc
         assert "scale=720:1280" in fc
-        assert needs_wm is False
+        assert "overlay" not in fc
 
     def test_effect_and_custom_filters_appended(self):
-        fc, _ = build_filter(effect_filter="eq=saturation=1.2", custom_filters="unsharp")
+        fc = build_filter(effect_filter="eq=saturation=1.2", custom_filters="unsharp")
         assert "eq=saturation=1.2" in fc and "unsharp" in fc
-
-    def test_watermark_adds_second_input(self):
-        fc, needs_wm = build_filter(watermark_path="wm.png")
-        assert needs_wm is True
-        assert "overlay" in fc
 
     def test_command_has_encode_flags(self):
         cmd = build_command("in.mp4", "out.mp4")
@@ -129,7 +124,7 @@ class TestDefaultEffects:
         from app.services.default_effects import DEFAULT_EFFECT_PRESETS
 
         for p in DEFAULT_EFFECT_PRESETS:
-            fc, _ = build_filter(effect_filter=p["ffmpeg_filter"])
+            fc = build_filter(effect_filter=p["ffmpeg_filter"])
             assert "crop=ih*9/16" in fc and "scale=720:1280" in fc, p["name"]
             cmd = build_command("in.mp4", "out.mp4", effect_filter=p["ffmpeg_filter"])
             assert "libx264" in " ".join(cmd), p["name"]
@@ -1757,7 +1752,7 @@ class TestSchedulerEdges:
         monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path / "m"))
         dirs = media_dirs()
         assert all(os.path.isdir(v) for v in dirs.values())
-        assert set(dirs) >= {"raw", "processed", "thumbnails", "watermarks", "audio", "profile_pics"}
+        assert set(dirs) >= {"raw", "processed", "thumbnails", "audio", "profile_pics"}
 
 
 class TestSecurityUnits:

@@ -21,7 +21,6 @@ def media_dirs() -> dict[str, str]:
         "raw": os.path.join(root, "raw"),
         "processed": os.path.join(root, "processed"),
         "thumbnails": os.path.join(root, "thumbnails"),
-        "watermarks": os.path.join(root, "watermarks"),
         "audio": os.path.join(root, "audio"),
         "profile_pics": os.path.join(root, "profile_pics"),
     }
@@ -91,11 +90,6 @@ def resolve_post_thumbnail_sync(video_id: int) -> str | None:
     return None
 
 
-def default_watermark() -> str | None:
-    p = os.path.join(media_dirs()["watermarks"], "watermark.png")
-    return p if os.path.exists(p) else None
-
-
 async def extract_thumbnail(src: str, duration: float, dst: str) -> None:
     import asyncio
 
@@ -151,7 +145,6 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
                 # Unknown name (e.g. deleted preset) — never feed it to FFmpeg.
                 effect_preset = ""
         custom_filters = video.custom_filters
-        add_watermark = video.add_watermark
         audio_choice = video.audio_track
         video.status = VideoStatus.processing
         s.commit()
@@ -182,14 +175,12 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
     out_len = effective_output_duration(info["duration"], trim_start, trim_end)
     out_name = f"{uuid.uuid4().hex}.mp4"
     dst = os.path.join(dirs["processed"], out_name)
-    watermark = default_watermark() if add_watermark else None
     cmd = ff.build_command(
         raw_path, dst,
         trim_start=trim_start, trim_end=trim_end,
         effect_filter=effect_filter or (effect_preset or ""),
         custom_filters=custom_filters or "",
         color_grade=color_grade,
-        watermark_path=watermark,
         has_audio=info["has_audio"],
         trending_audio=audio_path,
         music_volume=audio_vol,
@@ -254,14 +245,12 @@ async def process_video(
 
     out_name = f"{uuid.uuid4().hex}.mp4"
     dst = os.path.join(dirs["processed"], out_name)
-    watermark = default_watermark() if video.add_watermark else None
     cmd = ff.build_command(
         video.raw_path, dst,
         trim_start=video.trim_start, trim_end=video.trim_end,
         effect_filter=effect_filter or (video.effect_preset or ""),
         custom_filters=video.custom_filters or "",
         color_grade=color_grade,
-        watermark_path=watermark,
         has_audio=info["has_audio"],
         trending_audio=trending_audio,
         music_volume=music_volume,
