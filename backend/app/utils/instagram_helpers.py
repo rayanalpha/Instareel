@@ -27,6 +27,45 @@ def session_path_for(username: str, media_root: str) -> str:
     return os.path.join(d, f"{safe}.json")
 
 
+def session_owner_info(payload: object) -> "tuple[str | None, str | None]":
+    """Stable owner identity of an instagrapi session dump (pure — unit tested).
+
+    Returns (ds_user_id, username). The numeric id survives username changes;
+    the username comes from the ``ds_user`` cookie. Either may be None when
+    the dump predates them or carries no cookies.
+    """
+    if not isinstance(payload, dict):
+        return None, None
+    uid: str | None = None
+    auth = payload.get("authorization_data")
+    if isinstance(auth, dict):
+        raw_uid = auth.get("ds_user_id")
+        if raw_uid is not None and str(raw_uid).strip():
+            uid = str(raw_uid).strip()
+    cookies = payload.get("cookies")
+    items: list[tuple[str, str]] = []
+    if isinstance(cookies, dict):
+        items = [(str(k), str(v)) for k, v in cookies.items()]
+    elif isinstance(cookies, list):
+        for c in cookies:
+            if isinstance(c, dict) and c.get("name") is not None:
+                items.append((str(c.get("name")), str(c.get("value", ""))))
+    uname: str | None = None
+    sessionid: str | None = None
+    for name, value in items:
+        if name == "ds_user_id" and not uid and value.strip():
+            uid = value.strip()
+        elif name == "ds_user" and value.strip():
+            uname = value.strip()
+        elif name == "sessionid" and value.strip():
+            sessionid = value.strip()
+    if not uid and sessionid:
+        # sessionid shape is "<ds_user_id>:<token>" — last-resort owner id
+        # for dumps that carry no explicit ds_user_id cookie.
+        uid = sessionid_owner_id(sessionid)
+    return uid, uname
+
+
 def sanitize_sessionid(raw: str) -> str:
     """Clean a pasted sessionid cookie (pure — unit tested).
 

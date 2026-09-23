@@ -48,6 +48,9 @@ class Account(Base, TimestampMixin):
     __tablename__ = "accounts"
 
     username: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    # Stable Instagram numeric user id (ds_user_id). Usernames change; this
+    # never does — used to verify uploaded sessions and auto-adopt renames.
+    ig_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     password_enc: Mapped[str] = mapped_column(String(1024), nullable=False)
     proxy_id: Mapped[int | None] = mapped_column(ForeignKey("proxies.id"), nullable=True)
     status: Mapped[AccountStatus] = mapped_column(Enum(AccountStatus), default=AccountStatus.active)

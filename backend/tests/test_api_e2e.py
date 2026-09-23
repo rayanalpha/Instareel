@@ -159,6 +159,49 @@ class TestAccounts:
         assert c.get(f"/api/v1/accounts/{aid}").json()["has_session"] is True
         assert c.delete(f"/api/v1/accounts/{aid}/session").status_code == 204
 
+    def test_rename_moves_session_file(self, client, tmp_path):
+        import glob
+        import os
+
+        sessions = os.path.join(tmp_path, "media", "sessions")
+        c, _, _ = client
+        aid = c.post("/api/v1/accounts", json={"username": "oldname", "password": "pw"}).json()["id"]
+        c.post(f"/api/v1/accounts/{aid}/session",
+               files={"file": ("s.json", b'{"cookies": {"sessionid": "9:x"}, "uuids": {}}', "application/json")})
+        assert os.path.exists(os.path.join(sessions, "oldname.json"))
+        r = c.post(f"/api/v1/accounts/{aid}/rename?new_username=newname")
+        assert r.status_code == 200, r.text
+        assert r.json()["username"] == "newname"
+        assert not os.path.exists(os.path.join(sessions, "oldname.json"))
+        assert os.path.exists(os.path.join(sessions, "newname.json"))
+        assert c.get(f"/api/v1/accounts/{aid}").json()["has_session"] is True
+        # Invalid + clash rejected.
+        assert c.post(f"/api/v1/accounts/{aid}/rename?new_username=no!!bad").status_code == 400
+        other = c.post("/api/v1/accounts", json={"username": "taken", "password": "pw"}).json()["id"]
+        assert c.post(f"/api/v1/accounts/{aid}/rename?new_username=TAKEN").status_code == 409
+        assert c.delete(f"/api/v1/accounts/{other}").status_code == 204
+
+    def test_upload_adopts_owner_and_auto_renames(self, client):
+        import json as _json
+
+        c, _, _ = client
+        aid = c.post("/api/v1/accounts", json={"username": "before", "password": "pw"}).json()["id"]
+        dump = _json.dumps({"cookies": {"ds_user_id": "4242", "ds_user": "after", "sessionid": "4242:tok"},
+                            "authorization_data": {"ds_user_id": "4242"}, "uuids": {}})
+        r = c.post(f"/api/v1/accounts/{aid}/session",
+                   files={"file": ("s.json", dump.encode(), "application/json")})
+        assert r.status_code == 200, r.text
+        assert "auto-renamed @before → @after" in r.json()["detail"]
+        body = c.get(f"/api/v1/accounts/{aid}").json()
+        assert body["username"] == "after" and body["ig_user_id"] == "4242"
+        # A foreign session for another numeric id is rejected, not overwriting.
+        foreign = _json.dumps({"cookies": {"ds_user_id": "777", "ds_user": "after", "sessionid": "777:tok"},
+                               "uuids": {}})
+        bad = c.post(f"/api/v1/accounts/{aid}/session",
+                     files={"file": ("s.json", foreign.encode(), "application/json")})
+        assert bad.status_code == 400
+        assert c.get(f"/api/v1/accounts/{aid}").json()["ig_user_id"] == "4242"
+
 
 class TestVideos:
     def _mp4(self, tmp_path):

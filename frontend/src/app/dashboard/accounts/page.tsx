@@ -135,6 +135,17 @@ export default function AccountsPage() {
                 {actBtn(`/accounts/${a.id}/test-session`, "Test session")}
                 <button
                   className="btn-ghost !px-3 !py-1.5 text-xs"
+                  disabled={action.isPending}
+                  title="Username changed on Instagram? Rename the row — history, stats and session follow it."
+                  onClick={() => {
+                    const next = prompt(`Rename @${a.username} to:`, a.username)?.trim().replace(/^@/, "");
+                    if (next) action.mutate({ url: `/accounts/${a.id}/rename?new_username=${encodeURIComponent(next)}` });
+                  }}
+                >
+                  Rename
+                </button>
+                <button
+                  className="btn-ghost !px-3 !py-1.5 text-xs"
                   disabled={uploadingId === a.id}
                   onClick={() => { setUploadTarget(a.id); fileRef.current?.click(); }}
                 >

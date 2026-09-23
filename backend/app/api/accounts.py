@@ -28,13 +28,54 @@ def _has_session_file(username: str, session_file_path: str | None) -> bool:
 
 def _out(a: Account) -> AccountOut:
     return AccountOut(
-        id=a.id, username=a.username, proxy_id=a.proxy_id, status=a.status.value,
+        id=a.id, username=a.username, ig_user_id=a.ig_user_id, proxy_id=a.proxy_id, status=a.status.value,
         last_login=a.last_login, last_post=a.last_post, posts_today=a.posts_today,
         max_daily_posts=a.max_daily_posts, cooldown_until=a.cooldown_until,
         total_posts=a.total_posts, total_views=a.total_views, total_likes=a.total_likes,
         notes=a.notes, created_at=a.created_at, updated_at=a.updated_at,
         has_session=_has_session_file(a.username, a.session_file_path),
     )
+
+
+def _move_session_file(old_path: str | None, new_path: str) -> bool:
+    """Move an existing session file to its new canonical path. Returns True if moved."""
+    if old_path and old_path != new_path and os.path.exists(old_path):
+        os.replace(old_path, new_path)
+        return True
+    return False
+
+
+async def _rename_account(db: AsyncSession, acc: Account, new_username: str) -> str:
+    """Rename in place (no commit): row + session file. Returns the old username.
+
+    Everything else (posts, stats, rules, proxy link) keys off the integer id,
+    so history survives a username change.
+    """
+    import re
+
+    from app.config import settings
+    from app.utils.instagram_helpers import session_path_for
+
+    new_username = (new_username or "").strip().lstrip("@")
+    if not re.match(r"^[A-Za-z0-9._]{1,30}$", new_username):
+        raise HTTPException(400, "Invalid Instagram username (letters, numbers, . and _ only, max 30)")
+    if new_username.lower() != acc.username.lower():
+        clash = (await db.execute(
+            select(Account).where(func.lower(Account.username) == new_username.lower(), Account.id != acc.id)
+        )).scalar_one_or_none()
+        if clash:
+            raise HTTPException(409, f"Another account already uses @{new_username}")
+    old_username = acc.username
+    acc.username = new_username
+    old_path = acc.session_file_path or session_path_for(old_username, settings.MEDIA_ROOT)
+    new_path = session_path_for(new_username, settings.MEDIA_ROOT)
+    if _move_session_file(old_path, new_path):
+        acc.session_file_path = new_path
+    elif not os.path.exists(new_path):
+        acc.session_file_path = None
+    else:
+        acc.session_file_path = new_path
+    return old_username
 
 
 @router.get("", response_model=list[AccountOut])
@@ -94,6 +135,24 @@ async def update_account(account_id: int, body: AccountUpdate, _: str = Depends(
             raise HTTPException(400, "Invalid status")
     await db.commit()
     await db.refresh(acc)
+    return _out(acc)
+
+
+@router.post("/{account_id}/rename", response_model=AccountOut)
+async def rename_account(
+    account_id: int, new_username: str = Query(min_length=1, max_length=32),
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(__import__("app.api.deps", fromlist=["get_db"]).get_db),
+):
+    """Rename after a username change on Instagram — history, stats, rules and
+    the session file follow the account instead of being deleted with it."""
+    acc = await db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    old = await _rename_account(db, acc, new_username)
+    await db.commit()
+    await db.refresh(acc)
+    await log_event("INFO", "account", f"Account renamed @{old} → @{acc.username}")
     return _out(acc)
 
 
@@ -201,9 +260,15 @@ async def upload_session(
     Validates the payload is a JSON object containing the fields instagrapi
     needs (at minimum a cookies/authorization section), then stores it at the
     account's canonical session path.
+
+    The dump's stable owner id (ds_user_id) is adopted on first upload and
+    verified on later ones — a foreign session is rejected instead of
+    silently overwriting. When the dump's username differs from the row
+    (username changed on Instagram), the account auto-renames so the old
+    session keeps matching and no history is lost.
     """
     from app.config import settings
-    from app.utils.instagram_helpers import session_path_for
+    from app.utils.instagram_helpers import session_owner_info, session_path_for
 
     acc = await db.get(Account, account_id)
     if not acc:
@@ -230,6 +295,19 @@ async def upload_session(
             "Not an instagrapi session file (missing cookies/authorization data). "
             "Create it with backend/manual_login.py or session_from_browser.py.",
         )
+    owner_uid, owner_name = session_owner_info(payload)
+    if owner_uid and acc.ig_user_id and owner_uid != acc.ig_user_id:
+        raise HTTPException(
+            400,
+            f"Session belongs to a different Instagram account (id {owner_uid}); "
+            f"this row is linked to id {acc.ig_user_id}. Upload it to the right account.",
+        )
+    if owner_uid and not acc.ig_user_id:
+        acc.ig_user_id = owner_uid
+    extra = ""
+    if owner_name and owner_name.lower() != acc.username.lower():
+        old = await _rename_account(db, acc, owner_name)
+        extra = f" Account auto-renamed @{old} → @{acc.username} (username changed on Instagram)."
     spath = session_path_for(acc.username, settings.MEDIA_ROOT)
     tmp = spath + ".tmp"
     with open(tmp, "wb") as f:
@@ -239,7 +317,7 @@ async def upload_session(
     await db.commit()
     await db.refresh(acc)
     await log_event("INFO", "account", f"Session uploaded for @{acc.username}")
-    return {"ok": True, "detail": f"Session saved ({len(raw)} bytes). Press 'Test session' to verify."}
+    return {"ok": True, "detail": f"Session saved ({len(raw)} bytes).{extra} Press 'Test session' to verify."}
 
 
 @router.delete("/{account_id}/session", status_code=204)

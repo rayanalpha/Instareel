@@ -14,7 +14,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
 os.environ.setdefault("SYNC_DATABASE_URL", "sqlite://")
 
 from app.utils.ffmpeg import _parse_probe_json, build_command, build_filter  # noqa: E402
-from app.utils.instagram_helpers import device_settings_for, session_path_for  # noqa: E402
+from app.utils.instagram_helpers import device_settings_for, session_owner_info, session_path_for  # noqa: E402
 from app.core.security import decrypt_secret, encrypt_secret  # noqa: E402
 
 
@@ -28,6 +28,31 @@ class TestSessionPath:
     def test_creates_directory(self, tmp_path):
         p = session_path_for("user1", str(tmp_path))
         assert os.path.isdir(os.path.dirname(p))
+
+
+class TestSessionOwnerInfo:
+    def test_dict_cookies(self):
+        uid, uname = session_owner_info(
+            {"cookies": {"ds_user_id": "123", "ds_user": "new.name", "sessionid": "123:abc"}})
+        assert (uid, uname) == ("123", "new.name")
+
+    def test_list_cookies(self):
+        uid, uname = session_owner_info(
+            {"cookies": [{"name": "ds_user_id", "value": "77"}, {"name": "ds_user", "value": "u"}]})
+        assert (uid, uname) == ("77", "u")
+
+    def test_authorization_data_preferred(self):
+        uid, uname = session_owner_info(
+            {"authorization_data": {"ds_user_id": 999}, "cookies": {"ds_user": "u"}})
+        assert (uid, uname) == ("999", "u")
+
+    def test_sessionid_fallback(self):
+        assert session_owner_info({"cookies": {"sessionid": "4242:tok"}}) == ("4242", None)
+
+    def test_missing_info(self):
+        assert session_owner_info({"cookies": {"sessionid": "x"}}) == (None, None)
+        assert session_owner_info({}) == (None, None)
+        assert session_owner_info("nope") == (None, None)
 
 
 class TestDeviceSettings:

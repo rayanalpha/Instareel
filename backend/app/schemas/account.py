@@ -22,6 +22,7 @@ class AccountUpdate(BaseModel):
 class AccountOut(BaseModel):
     id: int
     username: str
+    ig_user_id: str | None = None
     proxy_id: int | None
     status: str
     last_login: dt.datetime | None
