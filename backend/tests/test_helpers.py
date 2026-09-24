@@ -895,6 +895,163 @@ class TestApplyProfile:
         assert "login" in kinds and "edit" in kinds
 
 
+class TestAnonIngest:
+    def test_classify_anon_error(self):
+        from app.services.anon_ingest import classify_anon_error
+
+        assert classify_anon_error(Exception("ERROR: Login required to access")) == "auth"
+        assert classify_anon_error(Exception("Private account, login needed")) == "auth"
+        assert classify_anon_error(Exception("HTTP Error 429: Too Many Requests")) == "throttled"
+        assert classify_anon_error(Exception("timed out")) == "throttled"
+        assert classify_anon_error(Exception("404: not found")) == "not-found"
+        assert classify_anon_error(Exception("weird explosion")) == "generic"
+
+    def _listing_payload(self, private=False):
+        def node(sc, typename, product="", caption="cap"):
+            return {"node": {
+                "shortcode": sc, "__typename": typename,
+                "is_video": typename == "GraphVideo",
+                "product_type": product,
+                "edge_media_to_caption": {"edges": [{"node": {"text": caption}}]},
+            }}
+
+        return {"data": {"user": {
+            "is_private": private,
+            "edge_owner_to_timeline_media": {"edges": [
+                node("AAA", "GraphVideo", "clips", "reel one"),
+                node("BBB", "GraphImage", "", "a photo"),
+                node("CCC", "GraphVideo", "feed", "feed vid"),
+            ]},
+        }}}
+
+    def test_list_public_posts_parses(self, monkeypatch):
+        import requests
+
+        from app.services.anon_ingest import list_public_posts
+
+        seen = {}
+
+        class Resp:
+            status_code = 200
+
+            def json(self):
+                return self._payload
+
+        def fake_get(url, params=None, headers=None, proxies=None, timeout=None):
+            seen["params"] = params
+            r = Resp()
+            r._payload = self._listing_payload()
+            return r
+
+        monkeypatch.setattr(requests, "get", fake_get)
+        items, err = list_public_posts("some.page", limit=10)
+        assert err is None
+        assert [i["shortcode"] for i in items] == ["AAA", "BBB", "CCC"]
+        assert items[0]["is_video"] and items[0]["product_type"] == "clips"
+        assert items[0]["caption"] == "reel one"
+        assert not items[1]["is_video"]
+        assert seen["params"] == {"username": "some.page"}
+
+    def test_list_public_posts_private_and_429(self, monkeypatch):
+        import requests
+
+        from app.services.anon_ingest import list_public_posts
+
+        class Resp:
+            def __init__(self, code, payload=None):
+                self.status_code = code
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+        monkeypatch.setattr(requests, "get", lambda *a, **k: Resp(429))
+        items, err = list_public_posts("x")
+        assert items == [] and err.startswith("throttled:")
+
+        payload = self._listing_payload(private=True)
+        monkeypatch.setattr(requests, "get", lambda *a, **k: Resp(200, payload))
+        items, err = list_public_posts("x")
+        assert items == [] and err.startswith("private:")
+
+    def test_download_post_with_fake_ydl(self, monkeypatch, tmp_path):
+        import json
+
+        import yt_dlp
+
+        from app.services.anon_ingest import download_post
+
+        d = tmp_path / "dl"
+        d.mkdir()
+
+        class FakeYDL:
+            def __init__(self, params):
+                self.params = params
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download):
+                assert "DcuQVFLvJMX" in url and download
+                (d / "DcuQVFLvJMX.mp4").write_bytes(b"\x00" * 64)
+                (d / "DcuQVFLvJMX.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+                (d / "DcuQVFLvJMX.info.json").write_text(
+                    json.dumps({"description": "hi 🎬 reels"}), encoding="utf-8")
+                return {"id": "DcuQVFLvJMX"}
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+        res, err = download_post("DcuQVFLvJMX", str(d))
+        assert err is None
+        assert res["video"].endswith(".mp4") and res["cover"].endswith(".jpg")
+        assert res["caption"] == "hi 🎬 reels"
+
+    def test_download_post_classifies_auth_failure(self, monkeypatch, tmp_path):
+        import yt_dlp
+
+        from app.services.anon_ingest import download_post
+
+        class BoomYDL:
+            def __init__(self, params):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download):
+                raise Exception("ERROR: [instagram] Dxxx: Login required")
+
+        monkeypatch.setattr(yt_dlp, "YoutubeDL", BoomYDL)
+        res, err = download_post("Dxxx", str(tmp_path))
+        assert res is None and err.startswith("auth:")
+
+    def test_install_cover_moves_jpg_and_converts_other(self, monkeypatch, tmp_path):
+        from app.tasks import source_tasks
+
+        thumbs = tmp_path / "th"
+        thumbs.mkdir()
+        dirs = {"thumbnails": str(thumbs)}
+
+        jpg = tmp_path / "c.jpg"
+        jpg.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        got = source_tasks._install_cover(str(jpg), dirs)
+        assert got and got.endswith(".jpg") and not jpg.exists()
+
+        webp = tmp_path / "c.webp"
+        webp.write_bytes(b"RIFF")
+        monkeypatch.setattr(source_tasks, "_convert_cover",
+                            lambda src, dst: (open(dst, "wb").write(b"x"), True)[1])
+        got2 = source_tasks._install_cover(str(webp), dirs)
+        assert got2 and got2.endswith(".jpg")
+
+        assert source_tasks._install_cover(str(tmp_path / "nope.png"), dirs) is None
+
+
 class TestMakeClientTimeout:
     def test_request_timeout_enforced_after_stale_session_load(self, monkeypatch, tmp_path):
         import json
