@@ -114,12 +114,6 @@ export function useServerStats() {
   // Skipped in background tabs by the browser's interval throttling.
   return useQuery({ queryKey: ["server-stats"], queryFn: () => get("/system/stats"), refetchInterval: 5000 });
 }
-export function useAccountHealth(id: string | number | undefined) {
-  return useQuery({
-    queryKey: ["account-health", id], queryFn: () => get(`/accounts/${id}/health`),
-    enabled: id !== undefined && id !== "", refetchInterval: 30000,
-  });
-}
 export function useBestSlots(accountId: string | number | "") {
   return useQuery({
     queryKey: ["best-slots", accountId],

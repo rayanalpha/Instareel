@@ -165,6 +165,7 @@ def ingest_source(self, source_id: int):
         VideoSource,
     )
     from app.services import anon_ingest
+    from app.services import media_hash as mh
     from app.services.instagram_service import InstagramService, _classify
     from app.services.video_processor import media_dirs
     from app.tasks import sync_helpers as sched
@@ -245,12 +246,15 @@ def ingest_source(self, source_id: int):
                 # Visual + caption dedupe (best-effort): md5 above only
                 # catches byte-identical files; the same clip under a new
                 # media id / re-encode is caught here and skipped, never failed.
+                # A computed phash is kept even when the similarity lookup
+                # itself errors — the hash is still valid for future rows.
                 phash = None
                 try:
-                    from app.services import media_hash as mh
-
                     phash = mh.frame_hash(dest)
-                    if phash:
+                except Exception:
+                    phash = None
+                if phash:
+                    try:
                         near = mh.find_near_duplicate(s, phash)
                         if near is not None:
                             os.remove(dest)
@@ -259,10 +263,10 @@ def ingest_source(self, source_id: int):
                         if cap is not None:
                             os.remove(dest)
                             raise _Duplicate(cap.id, "same caption")
-                except _Duplicate:
-                    raise
-                except Exception:
-                    phash = None
+                    except _Duplicate:
+                        raise
+                    except Exception:
+                        pass
                 video = Video(
                     original_filename=fname, raw_path=dest,
                     file_size=size, md5_hash=digest, phash=phash,

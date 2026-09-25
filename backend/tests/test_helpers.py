@@ -2253,6 +2253,27 @@ class TestAccountHealth:
         out = compute_health(status="active", posts_today=3, daily_cap=3)
         assert out["score"] == 100 and any("cap" in r for r in out["reasons"])
 
+    def test_expired_cooldown_not_scarred(self):
+        import datetime as dt
+
+        from app.services.account_health import compute_health
+
+        out = compute_health(
+            status="cooldown",
+            cooldown_until=dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1),
+        )
+        assert out["score"] == 90 and out["level"] == "healthy"
+        assert any("expired" in r for r in out["reasons"])
+
+    def test_summarize_statuses_shared_core(self):
+        from app.models import PostStatus
+        from app.services.account_health import summarize_statuses
+
+        assert summarize_statuses([]) == (0, 0, 0)
+        f, s, p = PostStatus.failed, PostStatus.scheduled, PostStatus.posted
+        assert summarize_statuses([f, f, p, f]) == (2, 3, 1)
+        assert summarize_statuses([p, f]) == (0, 1, 1)
+
 
 class TestMaybePark:
     def _session(self):

@@ -8,7 +8,8 @@ execute_post already handles (challenge/throttled).
 
 Design rules (anti-interference):
 - Scoring core is pure (compute_health): no DB, fully unit-tested.
-- DB access lives in thin sync/async wrappers sharing the same core.
+- Row aggregation is pure too (summarize_statuses), shared by the sync
+  worker path and the async API path so the two can never drift apart.
 - maybe_park_account_sync only mutates when status is "active" — it
   never fights an existing cooldown/challenge/ban, and it never commits
   (the caller owns the transaction).
@@ -47,20 +48,25 @@ def compute_health(
     score = 100
     reasons: list[str] = []
 
-    if status in ("banned",):
+    if status == "banned":
         return {"score": 0, "level": "critical", "reasons": ["account is banned"]}
     if status == "challenge_required":
         return {"score": 10, "level": "critical", "reasons": ["login challenge pending — re-verify the session"]}
     if status == "disabled":
         return {"score": 0, "level": "critical", "reasons": ["account disabled by admin"]}
     if status == "cooldown":
-        score -= 60
-        reasons.append("cooling down after throttling")
-        if cooldown_until is not None:
-            ts = cooldown_until
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=dt.timezone.utc)
-            if ts > now:
+        ts = cooldown_until
+        if ts is not None and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=dt.timezone.utc)
+        if ts is not None and ts <= now:
+            # Expired but not yet cleared (no sweeper resets it): the next
+            # tick treats it as eligible, so don't scar the score — say so.
+            score -= 10
+            reasons.append("cooldown expired — resumes on next tick")
+        else:
+            score -= 60
+            reasons.append("cooling down after throttling")
+            if ts is not None and ts > now:
                 reasons.append(f"cooldown lifts in {int((ts - now).total_seconds() // 3600)}h")
 
     if not proxy_healthy or proxy_fail_count >= 5:
@@ -92,11 +98,30 @@ def compute_health(
     return {"score": score, "level": level, "reasons": reasons}
 
 
+def summarize_statuses(statuses: list) -> tuple[int, int, int]:
+    """(consecutive-failure streak, failed count, posted count) over post
+    statuses newest-first. Pure — shared by the sync worker path and the
+    async API path so the two can never drift apart."""
+    from app.models import PostStatus
+
+    streak = 0
+    for st in statuses:
+        if st == PostStatus.failed:
+            streak += 1
+        else:
+            break
+    return (
+        streak,
+        sum(1 for st in statuses if st == PostStatus.failed),
+        sum(1 for st in statuses if st == PostStatus.posted),
+    )
+
+
 def _consecutive_failures(session, account_id: int, now: dt.datetime) -> tuple[int, int, int]:
     """(streak, failed_7d, posted_7d) from recent posts. Sync, worker-safe."""
     from sqlalchemy import desc, select
 
-    from app.models import Post, PostStatus
+    from app.models import Post
 
     since = now - dt.timedelta(days=STREAK_WINDOW_DAYS)
     rows = (
@@ -107,15 +132,7 @@ def _consecutive_failures(session, account_id: int, now: dt.datetime) -> tuple[i
             .limit(30)
         )
     ).all()
-    streak = 0
-    for (st,) in rows:
-        if st == PostStatus.failed:
-            streak += 1
-        else:
-            break
-    failed_7d = sum(1 for (st,) in rows if st == PostStatus.failed)
-    posted_7d = sum(1 for (st,) in rows if st == PostStatus.posted)
-    return streak, failed_7d, posted_7d
+    return summarize_statuses([st for (st,) in rows])
 
 
 def maybe_park_account_sync(session, account, now: dt.datetime | None = None) -> bool:
@@ -139,45 +156,16 @@ def maybe_park_account_sync(session, account, now: dt.datetime | None = None) ->
     account.cooldown_until = now + dt.timedelta(hours=PARK_HOURS)
     return True
 
-
-def evaluate_account_sync(session, account_id: int, now: dt.datetime | None = None) -> dict | None:
-    """Full health dict for one account (sync session). None if missing."""
-    from app.models import Account, Proxy
-    from app.tasks.sync_helpers import effective_max_posts
-
-    now = now or _now()
-    account = session.get(Account, account_id)
-    if account is None:
-        return None
-    proxy = session.get(Proxy, account.proxy_id) if account.proxy_id else None
-    streak, failed_7d, posted_7d = _consecutive_failures(session, account.id, now)
-    out = compute_health(
-        status=account.status.value,
-        cooldown_until=account.cooldown_until,
-        proxy_fail_count=proxy.fail_count if proxy else 0,
-        proxy_healthy=bool(proxy.is_healthy) if proxy else True,
-        posts_today=account.posts_today,
-        daily_cap=effective_max_posts(account.created_at, account.max_daily_posts, now),
-        fail_streak=streak,
-        failed_7d=failed_7d,
-        posted_7d=posted_7d,
-        now=now,
-    )
-    out["account_id"] = account.id
-    out["username"] = account.username
-    out["fail_streak"] = streak
-    return out
-
-
 async def evaluate_account(db, account_id: int) -> dict | None:
     """Full health dict for one account over the caller's async session.
 
     Reads through the passed session (test/prod identical) — the only
-    sync-session user is the worker's auto-park below.
+    other DB user is the worker's auto-park above. Row aggregation goes
+    through summarize_statuses, shared with the sync path.
     """
     from sqlalchemy import desc, select
 
-    from app.models import Account, Post, PostStatus, Proxy
+    from app.models import Account, Post, Proxy
     from app.tasks.sync_helpers import effective_max_posts
 
     now = _now()
@@ -194,14 +182,7 @@ async def evaluate_account(db, account_id: int) -> dict | None:
             .limit(30)
         )
     ).all()
-    streak = 0
-    for (st,) in rows:
-        if st == PostStatus.failed:
-            streak += 1
-        else:
-            break
-    failed_7d = sum(1 for (st,) in rows if st == PostStatus.failed)
-    posted_7d = sum(1 for (st,) in rows if st == PostStatus.posted)
+    streak, failed_7d, posted_7d = summarize_statuses([st for (st,) in rows])
     out = compute_health(
         status=account.status.value,
         cooldown_until=account.cooldown_until,

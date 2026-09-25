@@ -3,8 +3,8 @@
 The md5 in the ingest/upload paths only catches byte-identical files.
 The same clip re-downloaded under a different IG media id, cropped, or
 re-encoded sails through — and reposting it burns reach and looks
-bot-like. A 64-bit dHash of the middle frame catches all of those at a
-hamming distance <= 8.
+bot-like. A 64-bit dHash of a quarter-point frame catches all of those
+at a hamming distance <= 8.
 
 Design rules (anti-interference):
 - Pillow only (already a dependency) + the ffmpeg binary the pipeline
@@ -73,17 +73,18 @@ def frame_hash(video_path: str, at_fraction: float = 0.25) -> str | None:
 def find_near_duplicate(session, phash: str, *, threshold: int = NEAR_DUP_THRESHOLD,
                         exclude_id: int | None = None):
     """Newest visually-identical video, or None. Sync, worker-safe."""
-    from sqlalchemy import select
+    from sqlalchemy import desc, select
 
     from app.models import Video
 
-    q = select(Video).where(Video.phash.is_not(None))
+    q = select(Video.id, Video.phash).where(Video.phash.is_not(None))
     if exclude_id is not None:
         q = q.where(Video.id != exclude_id)
-    for video in session.execute(q).scalars().all():
+    q = q.order_by(desc(Video.id))
+    for vid, stored in session.execute(q).all():
         try:
-            if hamming(phash, video.phash or "") <= threshold:
-                return video
+            if stored and hamming(phash, stored) <= threshold:
+                return session.get(Video, vid)
         except (TypeError, ValueError):
             continue
     return None
@@ -123,10 +124,10 @@ def find_caption_duplicate(session, caption: str | None, *, min_len: int = 20,
     want = normalize_caption(caption)
     if len(want) < min_len:
         return None
-    q = select(Video).where(Video.source_caption.is_not(None))
+    q = select(Video.id, Video.source_caption).where(Video.source_caption.is_not(None))
     if exclude_id is not None:
         q = q.where(Video.id != exclude_id)
-    for video in session.execute(q).scalars().all():
-        if normalize_caption(video.source_caption) == want:
-            return video
+    for vid, stored in session.execute(q).all():
+        if stored and normalize_caption(stored) == want:
+            return session.get(Video, vid)
     return None

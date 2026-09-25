@@ -86,7 +86,7 @@ async def best_slots_for_account(db, account_id: int, *, limit: int = DEFAULT_LI
                 select(Post.posted_at, Post.views_7d).where(
                     Post.status == PostStatus.posted,
                     Post.posted_at.is_not(None),
-                )
+                ).limit(5000)
             )
         ).all()
         pairs = [(utc_hour(ts), v or 0) for ts, v in grows]

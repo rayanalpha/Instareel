@@ -128,12 +128,28 @@ async def score_video(db, video_id: int) -> dict:
         probe_ok = True
     except Exception:
         pass
+    # What will actually post: the newest post row's caption/hashtags when
+    # one exists (Post-now/scheduler fill them in), else the harvested one.
+    from sqlalchemy import desc, select
+
+    from app.models import Post
+
+    latest = (
+        await db.execute(
+            select(Post.caption, Post.hashtags)
+            .where(Post.video_id == video_id)
+            .order_by(desc(Post.id))
+            .limit(1)
+        )
+    ).first()
+    caption = (latest[0] if latest and latest[0] else None) or v.source_caption or ""
+    hashtags = (latest[1] if latest else None) or ""
     out = score_video_meta({
         "duration": v.duration or 0.0,
         "width": width, "height": height, "has_audio": has_audio,
         "audio_track": v.audio_track,
-        "caption": v.source_caption or "",
-        "hashtags": "",
+        "caption": caption,
+        "hashtags": hashtags,
         "has_effect": bool(v.effect_preset or v.custom_filters),
         "has_custom_cover": bool(v.custom_thumbnail_path),
         "has_cover": bool(v.custom_thumbnail_path or v.thumbnail_path),

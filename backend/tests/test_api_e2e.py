@@ -1051,3 +1051,27 @@ class TestGuardianEndpoints:
         assert sum(b["points"] for b in body["breakdown"]) == body["score"]
         assert any("probe" in s for s in body["suggestions"])
         assert c.get("/api/v1/videos/999999/score").status_code == 404
+
+    def test_video_score_uses_post_caption_and_tags(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="sc2", password_enc="x"))
+                s.add(Video(original_filename="sc2.mp4", raw_path="/tmp/does-not-exist-2.mp4",
+                            md5_hash="scv2", status=VideoStatus.processed, duration=15.0))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "sc2"))).scalar_one()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "scv2"))).scalar_one()
+                s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.scheduled,
+                           caption="launch day", hashtags="#a #b #c #d"))
+                await s.commit()
+                return vid.id
+
+        import asyncio
+
+        vid_id = asyncio.get_event_loop().run_until_complete(seed())
+        body = c.get(f"/api/v1/videos/{vid_id}/score").json()
+        cap = next(b for b in body["breakdown"] if b["key"] == "caption")
+        assert cap["points"] == 20, body
+        assert not any("هشتگ ندارد" in s for s in body["suggestions"])
