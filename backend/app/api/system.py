@@ -21,6 +21,21 @@ from app.services import analytics_service, log_service
 analytics_router = APIRouter()
 logs_router = APIRouter()
 settings_router = APIRouter()
+system_router = APIRouter()
+
+
+@system_router.get("/stats")
+async def system_stats(_: str = Depends(get_current_admin)):
+    """Live host + container resources for the Server panel.
+
+    Runs in a thread (psutil blocks ~0.5s for a real CPU sample, the
+    Docker socket can stall) so the event loop never waits on it.
+    """
+    import asyncio
+
+    from app.services import host_stats
+
+    return await asyncio.to_thread(host_stats.full_snapshot)
 
 
 @analytics_router.get("/overview")

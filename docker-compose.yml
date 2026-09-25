@@ -49,7 +49,13 @@ services:
     env_file: .env
     environment:
       <<: *backend-env
-    volumes: *app-volumes
+    volumes:
+      - ./data:/data
+      - ./media:/data/media
+      # Read-only Docker socket for the Server panel's per-container stats.
+      # The API only calls list/stats (never create/exec); without it the
+      # panel still shows host CPU/RAM/disk with docker=false.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       redis:
         condition: service_healthy

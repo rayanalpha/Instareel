@@ -725,6 +725,16 @@ class TestResources:
         assert c.put("/api/v1/settings/nope_nada", json={"value": "x"}).status_code == 404
         assert c.put("/api/v1/settings/pool_country", json={"value": "x" * 6000}).status_code == 422
 
+    def test_system_stats_shape(self, client):
+        c, _, _ = client
+        r = c.get("/api/v1/system/stats")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert 0 <= body["cpu"]["total"] <= 100 * body["cpu"]["count"]
+        assert body["mem"]["total"] > 0
+        assert body["disk"] and body["uptime_s"] > 0
+        assert isinstance(body["docker"], bool) and isinstance(body["containers"], list)
+
     def test_preview_thumbnail_404(self, client):
         c, _, _ = client
         # Unauthenticated preview reveals nothing (401 before any existence check).

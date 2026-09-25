@@ -7,6 +7,10 @@ alembic==1.14.0
 celery[redis]==5.4.0
 redis==5.2.1
 instagrapi==3.0.2
+# Live server monitor: host numbers (always) + per-container stats when the
+# Docker socket is mounted (see docker-compose backend volumes).
+psutil==6.1.0
+docker==7.1.0
 # Account-free downloads of PUBLIC pages: single-post extraction + thumbnails
 # + captions via yt-dlp (verified 2026-09-25: mp4 + jpg + info.json, no login).
 # Pinned: IG page formats drift, so upgrades are deliberate, not silent.

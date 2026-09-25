@@ -1139,6 +1139,44 @@ class TestAnonIngest:
         assert source_tasks._install_cover(str(tmp_path / "nope.png"), dirs) is None
 
 
+class TestHostStats:
+    def test_host_snapshot_shape(self):
+        from app.services.host_stats import host_snapshot
+
+        s = host_snapshot()
+        assert 0 <= s["cpu"]["total"] <= 100 * s["cpu"]["count"]
+        assert len(s["cpu"]["per_core"]) == s["cpu"]["count"]
+        assert s["mem"]["total"] > 0 and 0 <= s["mem"]["percent"] <= 100
+        assert s["disk"] and all(d["total"] > 0 for d in s["disk"])
+        assert s["net"]["sent"] >= 0 and s["uptime_s"] > 0
+
+    def test_container_cpu_math(self):
+        from app.services.host_stats import _container_cpu_percent
+
+        stats = {
+            "cpu_stats": {
+                "cpu_usage": {"total_usage": 2_000_000_000, "percpu_usage": [0, 0]},
+                "system_cpu_usage": 4_000_000_000, "online_cpus": 2,
+            },
+            "precpu_stats": {
+                "cpu_usage": {"total_usage": 1_000_000_000},
+                "system_cpu_usage": 2_000_000_000,
+            },
+        }
+        assert _container_cpu_percent(stats) == 100.0
+        assert _container_cpu_percent({}) == 0.0
+
+    def test_container_snapshot_none_without_docker(self, monkeypatch):
+        import sys
+
+        from app.services import host_stats
+
+        monkeypatch.setitem(sys.modules, "docker", None)
+        assert host_stats.container_snapshot() is None
+        snap = host_stats.full_snapshot()
+        assert snap["docker"] is False and snap["containers"] == []
+
+
 class TestPreviewTokens:
     def test_roundtrip_and_wrong_video_rejected(self):
         from app.core.security import create_preview_token, verify_preview_token

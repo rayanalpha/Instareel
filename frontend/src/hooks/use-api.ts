@@ -109,6 +109,11 @@ export function useLogs() {
 export function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => get("/settings") });
 }
+export function useServerStats() {
+  // Live host/container resources; 5s poll is the point of the page.
+  // Skipped in background tabs by the browser's interval throttling.
+  return useQuery({ queryKey: ["server-stats"], queryFn: () => get("/system/stats"), refetchInterval: 5000 });
+}
 export function useApiMutation(method: "post" | "put" | "delete", invalidate: string[][] = [], successMsg?: string) {
   const qc = useQueryClient();
   return useMutation({
