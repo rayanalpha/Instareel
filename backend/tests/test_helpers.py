@@ -730,6 +730,42 @@ class TestEffectiveDuration:
         assert effective_output_duration(20.0, 8.0, 5.0) == 12.0  # end<=start ignored
 
 
+class TestValidateEncodeInputs:
+    def _info(self, **kw):
+        base = {"duration": 20.0, "width": 720, "height": 1280, "has_audio": True}
+        base.update(kw)
+        return base
+
+    def test_happy_path_returns_out_len(self):
+        from app.services.video_processor import validate_encode_inputs
+
+        assert validate_encode_inputs(self._info(), 2.0, 8.0) == 6.0
+        assert validate_encode_inputs(self._info(), None, None) == 20.0
+
+    def test_short_and_streamless_rejected(self):
+        import pytest
+
+        from app.services.video_processor import validate_encode_inputs
+
+        with pytest.raises(ValueError, match="too short"):
+            validate_encode_inputs(self._info(duration=2.5), None, None)
+        with pytest.raises(ValueError, match="no video stream"):
+            validate_encode_inputs(self._info(width=0, height=0), None, None)
+
+    def test_trim_past_eof_rejected_with_actionable_error(self):
+        import pytest
+
+        from app.services.video_processor import validate_encode_inputs
+
+        # This used to die inside FFmpeg as "Could not open encoder
+        # before EOF / frame= 0" with no hint at the trim.
+        with pytest.raises(ValueError, match="past the end"):
+            validate_encode_inputs(self._info(), 25.0, None)
+        with pytest.raises(ValueError, match="past the end"):
+            validate_encode_inputs(self._info(), 20.0, 30.0)
+
+
+
 class _FakeIGClient:
     """Stand-in for instagrapi.Client (no network). Records calls."""
 

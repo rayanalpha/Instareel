@@ -44,6 +44,28 @@ def effective_output_duration(probe_duration: float, trim_start: float | None, t
     return total
 
 
+def validate_encode_inputs(info: dict, trim_start: float | None, trim_end: float | None) -> float:
+    """Pre-encode sanity checks that fail fast with actionable errors.
+
+    Without these, a trim past EOF (or a file with no video stream) dies
+    inside FFmpeg as "Could not open encoder before EOF / frame= 0",
+    which says nothing about the actual cause. Returns output length.
+    """
+    duration = info.get("duration") or 0.0
+    if duration < 3:
+        raise ValueError(f"Video too short ({duration:.1f}s < 3s)")
+    if not info.get("width") or not info.get("height"):
+        raise ValueError("File has no video stream — re-upload or re-ingest the source")
+    if trim_start and trim_start >= duration:
+        raise ValueError(
+            f"Trim start ({trim_start:.1f}s) is past the end of the video ({duration:.1f}s) — "
+            "clear the trim range and process again")
+    out_len = effective_output_duration(duration, trim_start, trim_end)
+    if out_len <= 0:
+        raise ValueError("Trim range is empty — trim_end must be greater than trim_start")
+    return out_len
+
+
 def md5_of_file(path: str) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -152,8 +174,7 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
     dirs = media_dirs()
     set_progress_sync(video_id, 2, "probing")
     info = ff.probe_sync(raw_path)
-    if info["duration"] < 3:
-        raise ValueError(f"Video too short ({info['duration']:.1f}s < 3s)")
+    out_len = validate_encode_inputs(info, trim_start, trim_end)
     set_progress_sync(video_id, 8, "validated")
 
     # Resolve the chosen trending track (name -> file/volume/mode). Unknown
@@ -172,7 +193,7 @@ def process_video_sync(video_id: int, effect_filter: str = "", color_grade: str 
 
     # Post-trim output length drives music looping, progress parsing,
     # thumbnail seek and the stored duration — never the raw probe length.
-    out_len = effective_output_duration(info["duration"], trim_start, trim_end)
+    # (Already validated > 0 above.)
     out_name = f"{uuid.uuid4().hex}.mp4"
     dst = os.path.join(dirs["processed"], out_name)
     cmd = ff.build_command(
