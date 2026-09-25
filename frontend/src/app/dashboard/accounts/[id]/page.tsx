@@ -36,6 +36,39 @@ export default function AccountDetailPage() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
+  // Background transitions (cooldown expiry, challenge flags from workers)
+  // would otherwise sit invisible until revisit. Cheap DB reads, slow
+  // state — 30s is plenty. Failed ticks are skipped silently; load() only
+  // surfaces errors from the initial mount.
+  useEffect(() => {
+    let cancelled = false;
+    let inflight = false;
+    const tick = async () => {
+      if (inflight || cancelled || document.hidden) return;
+      inflight = true;
+      try {
+        const [{ data: a }, { data: s }, { data: p }] = await Promise.all([
+          api.get(`/accounts/${id}`),
+          api.get(`/accounts/${id}/analytics`),
+          api.get("/proxies"),
+        ]);
+        if (!cancelled) {
+          setAcc(a);
+          setStats(s);
+          setProxies(p ?? []);
+        }
+      } catch { /* next tick */ } finally {
+        inflight = false;
+      }
+    };
+    const timer = setInterval(tick, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+    /* eslint-disable-next-line */
+  }, [id]);
+
   async function uploadSession(file: File) {
     setUploading(true);
     try {

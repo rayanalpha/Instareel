@@ -73,7 +73,9 @@ export function useQueue() {
   return useQuery({ queryKey: ["queue"], queryFn: () => get("/posts/queue"), refetchInterval: 30000 });
 }
 export function useRules() {
-  return useQuery({ queryKey: ["rules"], queryFn: () => get("/schedule") });
+  // Beat retires one-shot pins and pauses rules in the background; no WS
+  // event covers this key, so poll like the other live lists.
+  return useQuery({ queryKey: ["rules"], queryFn: () => get("/schedule"), refetchInterval: 30000 });
 }
 export function useCaptions() {
   return useQuery({ queryKey: ["captions"], queryFn: () => get("/captions") });

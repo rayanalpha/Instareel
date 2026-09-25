@@ -36,6 +36,7 @@ export default function VideoDetailPage() {
   const [nowState, setNowState] = useState<{ status: string; url?: string; error?: string } | null>(null);
 
   const [loadError, setLoadError] = useState("");
+  const [connLost, setConnLost] = useState(false);
   const [actionError, setActionError] = useState("");
   async function load() {
     const { data } = await api.get(`/videos/${id}`);
@@ -56,12 +57,16 @@ export default function VideoDetailPage() {
     return data as Detail;
   }
 
-  // Poll only while the video is in a transitional state; stop on error.
+  // Poll only while the video is in a transitional state; stop on DONE.
+  // Transient failures NEVER stop the poll — a single network blip during
+  // a 10-minute encode used to freeze the page on "processing" until a
+  // manual refresh. After 3 straight failures a banner shows; ticks resume.
   // Guarded against overlap: a slow load() never piles up concurrent polls.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
     let inflight = false;
+    let fails = 0;
     const stop = () => {
       if (timer) {
         clearInterval(timer);
@@ -69,16 +74,17 @@ export default function VideoDetailPage() {
       }
     };
     const tick = async () => {
-      if (inflight || cancelled) return;
+      if (inflight || cancelled || document.hidden) return;
       inflight = true;
       try {
         const cur = await load();
+        fails = 0;
+        if (!cancelled) setConnLost(false);
         if (DONE_STATES.has(cur.status)) stop();
       } catch {
-        if (!cancelled) {
-          setLoadError("Failed to load video — retrying stopped.");
-          stop();
-        }
+        if (cancelled) return;
+        fails += 1;
+        if (fails >= 3) setConnLost(true);
       } finally {
         inflight = false;
       }
@@ -219,6 +225,11 @@ export default function VideoDetailPage() {
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
+      {connLost && (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 xl:col-span-2 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          Connection lost — retrying automatically…
+        </p>
+      )}
       <Card>
           <div className="mb-2 flex min-w-0 items-center gap-2">
             <div className="min-w-0 flex-1 truncate" title={video.original_filename}><CardTitle>#{video.id} · {video.original_filename}</CardTitle></div>

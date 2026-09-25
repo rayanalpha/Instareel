@@ -25,13 +25,14 @@ async def publish(event: str, payload: dict[str, Any]) -> None:
 
 
 async def set_progress(video_id: int, percentage: float, stage: str) -> None:
+    # Same contract as the sync variant: persist for /status polling, never
+    # publish per-tick events (see sync_helpers.set_progress_sync).
     try:
         client = _client()
         try:
             await client.set(f"igfunnel:progress:{video_id}", json.dumps({"percentage": percentage, "stage": stage}), ex=3600)
         finally:
             await client.aclose()
-        await publish("video_processing_progress", {"video_id": video_id, "percentage": percentage, "stage": stage})
     except Exception:
         pass
 

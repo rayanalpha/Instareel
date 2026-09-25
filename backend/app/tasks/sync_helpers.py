@@ -32,6 +32,10 @@ def publish_sync(event: str, payload: dict) -> None:
 
 
 def set_progress_sync(video_id: int, percentage: float, stage: str) -> None:
+    # Redis SET only — no event publish. The old per-tick publish made every
+    # client refetch videos+sources+overview several times a second during
+    # any encode (nothing displays live % from queries; the detail page
+    # polls /status). Terminal states still publish video_processing_complete.
     try:
         client = _redis_client()
         try:
@@ -42,10 +46,6 @@ def set_progress_sync(video_id: int, percentage: float, stage: str) -> None:
             )
         finally:
             client.close()
-        publish_sync(
-            "video_processing_progress",
-            {"video_id": video_id, "percentage": percentage, "stage": stage},
-        )
     except Exception:
         pass
 
