@@ -56,6 +56,10 @@ def validate_encode_inputs(info: dict, trim_start: float | None, trim_end: float
         raise ValueError(f"Video too short ({duration:.1f}s < 3s)")
     if not info.get("width") or not info.get("height"):
         raise ValueError("File has no video stream — re-upload or re-ingest the source")
+    if info.get("video_packets") == 0:
+        raise ValueError(
+            "File lists a video stream but contains zero video packets (broken download) — "
+            "delete it and re-ingest/re-upload the source")
     if trim_start and trim_start >= duration:
         raise ValueError(
             f"Trim start ({trim_start:.1f}s) is past the end of the video ({duration:.1f}s) — "

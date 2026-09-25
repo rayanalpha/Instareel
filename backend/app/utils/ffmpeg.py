@@ -20,18 +20,36 @@ def _parse_probe_json(raw: bytes) -> dict:
     video = next((s for s in streams if s.get("codec_type") == "video"), {})
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
     duration = float(info.get("format", {}).get("duration") or video.get("duration") or 0)
+    raw_packets = video.get("nb_read_packets")
+    video_packets: int | None = None
+    if raw_packets is not None:
+        try:
+            video_packets = int(raw_packets)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            video_packets = None
     return {
         "duration": duration,
         "width": int(video.get("width") or 0),
         "height": int(video.get("height") or 0),
         "has_audio": audio is not None,
+        # Populated only when probed with -count_packets. A header-only file
+        # (streams listed, zero packets) passes every other check and then
+        # dies in the encoder with "no packets" — reject it up front.
+        "video_packets": video_packets,
     }
+
+
+def _probe_args(path: str) -> list[str]:
+    # -count_packets only demuxes (no decode) — fast, and exposes
+    # header-only/broken files via nb_read_packets.
+    return ["ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", "-count_packets", path]
 
 
 def probe_sync(path: str) -> dict:
     """Blocking ffprobe (Celery-safe)."""
     proc = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path],
+        _probe_args(path),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=60,
@@ -45,7 +63,7 @@ async def probe(path: str) -> dict:
     import asyncio
 
     proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path,
+        *_probe_args(path),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     out, _ = await proc.communicate()
@@ -222,7 +240,7 @@ def run_sync_with_progress(cmd: list[str], duration: float, on_progress) -> None
         except Exception:
             pass
     if rc != 0:
-        raise RuntimeError("FFmpeg failed: " + " | ".join(stderr_tail[-8:]))
+        raise RuntimeError("FFmpeg failed: " + " | ".join(stderr_tail[-25:]))
 
 
 async def run_with_progress(cmd: list[str], duration: float, on_progress) -> None:
@@ -243,4 +261,4 @@ async def run_with_progress(cmd: list[str], duration: float, on_progress) -> Non
                 await on_progress(pct, "processing")
     await proc.wait()
     if proc.returncode != 0:
-        raise RuntimeError("FFmpeg failed: " + " | ".join(stderr_tail[-8:]))
+        raise RuntimeError("FFmpeg failed: " + " | ".join(stderr_tail[-25:]))

@@ -123,6 +123,18 @@ class TestProbeParsing:
         assert info["width"] == 0
         assert info["height"] == 0
         assert info["has_audio"] is False
+        assert info["video_packets"] is None
+
+    def test_packet_counts_parsed(self):
+        raw = json.dumps({
+            "streams": [
+                {"codec_type": "video", "width": 720, "height": 1280, "nb_read_packets": "483"},
+                {"codec_type": "audio", "nb_read_packets": "921"},
+            ],
+            "format": {"duration": "19.2"},
+        }).encode()
+        info = _parse_probe_json(raw)
+        assert info["video_packets"] == 483
 
 
 class TestDefaultEffects:
@@ -763,6 +775,19 @@ class TestValidateEncodeInputs:
             validate_encode_inputs(self._info(), 25.0, None)
         with pytest.raises(ValueError, match="past the end"):
             validate_encode_inputs(self._info(), 20.0, 30.0)
+
+    def test_header_only_file_rejected(self):
+        import pytest
+
+        from app.services.video_processor import validate_encode_inputs
+
+        # Streams listed but zero packets: passes every other check, then
+        # dies in the encoder with "no packets". Fail fast instead.
+        with pytest.raises(ValueError, match="zero video packets"):
+            validate_encode_inputs(self._info(video_packets=0), None, None)
+        # Unknown (probed without -count_packets) still passes.
+        assert validate_encode_inputs(self._info(video_packets=None), None, None) == 20.0
+        assert validate_encode_inputs(self._info(video_packets=483), None, None) == 20.0
 
 
 
