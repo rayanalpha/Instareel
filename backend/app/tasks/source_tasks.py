@@ -112,10 +112,12 @@ def _convert_cover(src: str, dst: str) -> bool:
 
 
 class _Duplicate(Exception):
-    """Same bytes already in the library (also catches anon/authed re-ingests)."""
+    """Already in the library: same bytes (md5), same look (pHash) or same
+    caption. Carries the existing video id; note names the match kind."""
 
-    def __init__(self, video_id: int):
-        super().__init__(f"duplicate of video #{video_id}")
+    def __init__(self, video_id: int, note: str = ""):
+        msg = f"duplicate of video #{video_id}" + (f" ({note})" if note else "")
+        super().__init__(msg)
         self.video_id = video_id
 
 
@@ -240,9 +242,30 @@ def ingest_source(self, source_id: int):
                 except Exception:
                     os.remove(dest)
                     raise ValueError("ffprobe validation failed")
+                # Visual + caption dedupe (best-effort): md5 above only
+                # catches byte-identical files; the same clip under a new
+                # media id / re-encode is caught here and skipped, never failed.
+                phash = None
+                try:
+                    from app.services import media_hash as mh
+
+                    phash = mh.frame_hash(dest)
+                    if phash:
+                        near = mh.find_near_duplicate(s, phash)
+                        if near is not None:
+                            os.remove(dest)
+                            raise _Duplicate(near.id, "visual hash")
+                        cap = mh.find_caption_duplicate(s, caption)
+                        if cap is not None:
+                            os.remove(dest)
+                            raise _Duplicate(cap.id, "same caption")
+                except _Duplicate:
+                    raise
+                except Exception:
+                    phash = None
                 video = Video(
                     original_filename=fname, raw_path=dest,
-                    file_size=size, md5_hash=digest,
+                    file_size=size, md5_hash=digest, phash=phash,
                     duration=(probe or {}).get("duration"),
                     custom_thumbnail_path=cover_path,
                     source_caption=caption,

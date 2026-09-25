@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { api, apiBase } from "@/lib/api";
 import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
-import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
+import { useApiMutation, useAudios, useEffects, useVideoScore } from "@/hooks/use-api";
 
 interface Detail {
   id: number; original_filename: string; duration: number | null; status: string;
@@ -34,6 +34,8 @@ export default function VideoDetailPage() {
   const postNow = useApiMutation("post", [["videos"], ["posts"], ["queue"]]);
   const [nowPostId, setNowPostId] = useState<number | null>(null);
   const [nowState, setNowState] = useState<{ status: string; url?: string; error?: string } | null>(null);
+  // Warn-only pre-flight gate: static per video state, refreshes after reprocess.
+  const { data: score } = useVideoScore(id, video?.status);
 
   const [loadError, setLoadError] = useState("");
   const [connLost, setConnLost] = useState(false);
@@ -405,6 +407,38 @@ export default function VideoDetailPage() {
               Re-process
             </button>
           </div>
+          {score && (
+            <div className={`mt-2 rounded-lg border p-3 text-sm ${
+              score.verdict === "ready"
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : score.verdict === "needs-work"
+                  ? "border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                  : "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+            }`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Viral score: {score.score}/100</p>
+                <span className="text-xs font-semibold">
+                  {score.verdict === "ready" ? "ready ✓" : score.verdict === "needs-work" ? "needs work" : "risky — warn only, posting still allowed"}
+                </span>
+              </div>
+              <div className="mt-2 space-y-1">
+                {(score.breakdown ?? []).map((b: { key: string; label: string; points: number; max: number }) => (
+                  <div key={b.key} className="flex items-center gap-2 text-xs">
+                    <span className="w-24 shrink-0">{b.label}</span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                      <div className="h-full rounded-full bg-current" style={{ width: `${(b.points / b.max) * 100}%` }} />
+                    </div>
+                    <span className="w-12 shrink-0 text-right tabular-nums">{b.points}/{b.max}</span>
+                  </div>
+                ))}
+              </div>
+              {(score.suggestions ?? []).length > 0 && (
+                <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs">
+                  {(score.suggestions as string[]).map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
           {video.status === "processed" && (
             <div className="mt-2">
               <button

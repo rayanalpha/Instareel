@@ -2201,3 +2201,230 @@ class TestPersistedMismatches:
 
         assert _persisted_mismatches({}, {"biography": "whatever"}) == []
         assert _persisted_mismatches({"biography": "hi"}, {"biography": "other"}) == ["biography"]
+
+
+class TestAccountHealth:
+    def test_healthy_account_scores_high(self):
+        from app.services.account_health import compute_health
+
+        out = compute_health(status="active")
+        assert out["score"] == 100 and out["level"] == "healthy"
+
+    def test_challenge_is_critical(self):
+        from app.services.account_health import compute_health
+
+        out = compute_health(status="challenge_required")
+        assert out["level"] == "critical" and out["score"] <= 10
+
+    def test_banned_and_disabled_zero(self):
+        from app.services.account_health import compute_health
+
+        assert compute_health(status="banned")["score"] == 0
+        assert compute_health(status="disabled")["score"] == 0
+
+    def test_cooldown_drops_below_healthy(self):
+        import datetime as dt
+
+        from app.services.account_health import compute_health
+
+        out = compute_health(
+            status="cooldown",
+            cooldown_until=dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=3),
+        )
+        assert out["score"] < 70 and any("cool" in r for r in out["reasons"])
+
+    def test_dead_proxy_costs_25(self):
+        from app.services.account_health import compute_health
+
+        out = compute_health(status="active", proxy_fail_count=6, proxy_healthy=False)
+        assert out["score"] == 75 and any("proxy" in r for r in out["reasons"])
+
+    def test_failure_streak_and_rate(self):
+        from app.services.account_health import compute_health
+
+        # streak 4 -> -40, fail-rate 4/5 -> -20: exactly 40 = watch floor.
+        out = compute_health(status="active", fail_streak=4, failed_7d=4, posted_7d=1)
+        assert out["score"] == 40 and out["level"] == "watch"
+        assert any("consecutive" in r for r in out["reasons"])
+
+    def test_daily_cap_is_note_not_penalty(self):
+        from app.services.account_health import compute_health
+
+        out = compute_health(status="active", posts_today=3, daily_cap=3)
+        assert out["score"] == 100 and any("cap" in r for r in out["reasons"])
+
+
+class TestMaybePark:
+    def _session(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)()
+
+    def _account_with_fails(self, s, n_fail, tag, status="active"):
+        import datetime as dt
+
+        from app.models import Account, AccountStatus, Post, PostStatus, Video, VideoStatus
+
+        acc = Account(username=f"h{tag}", password_enc="x", status=AccountStatus(status))
+        s.add(acc)
+        s.flush()
+        vid = Video(original_filename="v.mp4", raw_path="/tmp/v.mp4",
+                    md5_hash=f"mh{tag}", status=VideoStatus.processed)
+        s.add(vid)
+        s.flush()
+        for _ in range(n_fail):
+            s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.failed,
+                       created_at=dt.datetime.now(dt.timezone.utc)))
+        s.commit()
+        return acc
+
+    def test_parks_after_five_consecutive_fails(self):
+        from app.models import AccountStatus
+        from app.services.account_health import maybe_park_account_sync
+
+        s = self._session()
+        acc = self._account_with_fails(s, 5, "park5")
+        assert maybe_park_account_sync(s, acc) is True
+        assert acc.status == AccountStatus.cooldown and acc.cooldown_until is not None
+        s.rollback()
+
+    def test_no_park_below_threshold(self):
+        from app.services.account_health import maybe_park_account_sync
+
+        s = self._session()
+        acc = self._account_with_fails(s, 3, "park3")
+        assert maybe_park_account_sync(s, acc) is False
+
+    def test_never_fights_existing_state(self):
+        from app.services.account_health import maybe_park_account_sync
+
+        s = self._session()
+        acc = self._account_with_fails(s, 9, "park9", status="cooldown")
+        assert maybe_park_account_sync(s, acc) is False
+
+
+class TestMediaHash:
+    def test_identical_images_same_hash(self):
+        from PIL import Image
+
+        from app.services.media_hash import dhash_hex, hamming
+
+        a = Image.new("RGB", (64, 64), (10, 20, 30))
+        b = Image.new("RGB", (64, 64), (10, 20, 30))
+        assert dhash_hex(a) == dhash_hex(b) and hamming(dhash_hex(a), dhash_hex(b)) == 0
+
+    def test_different_images_differ(self):
+        from PIL import Image
+
+        from app.services.media_hash import dhash_hex, hamming
+
+        # Flat images hash degenerately (all-zero) — use a decreasing
+        # gradient: every adjacent comparison is true -> all 64 bits set.
+        flat = Image.new("RGB", (64, 64), (128, 128, 128))
+        grad = Image.new("RGB", (64, 64))
+        px = grad.load()
+        assert px is not None
+        for x in range(64):
+            for y in range(64):
+                v = 255 - x * 4
+                px[x, y] = (v, v, v)
+        assert hamming(dhash_hex(flat), dhash_hex(grad)) == 64
+
+    def test_hamming_known_value(self):
+        from app.services.media_hash import hamming
+
+        assert hamming("ff00ff00ff00ff00", "ff00ff00ff00ff00") == 0
+        assert hamming("ffffffffffffffff", "0000000000000000") == 64
+
+    def test_frame_hash_never_raises(self):
+        from app.services.media_hash import frame_hash
+
+        assert frame_hash("/nonexistent/path.mp4") is None
+
+    def test_normalize_caption(self):
+        from app.services.media_hash import normalize_caption
+
+        assert normalize_caption("Hello  #World\nNew") == "hello new"
+        assert normalize_caption(None) == "" and normalize_caption("  ") == ""
+
+    def test_find_near_and_caption_duplicates(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.database import Base
+        from app.models import Video, VideoStatus
+        from app.services.media_hash import find_caption_duplicate, find_near_duplicate
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        s = sessionmaker(bind=engine)()
+        s.add(Video(original_filename="a.mp4", raw_path="/tmp/a.mp4", md5_hash="qa",
+                    status=VideoStatus.processed, phash="aaaaaaaaaaaaaaaa",
+                    source_caption="Sunset vibes over the city #reels"))
+        s.commit()
+        hit = find_near_duplicate(s, "aaaaaaaaaaaaaaab")  # 1 bit off
+        assert hit is not None and hit.original_filename == "a.mp4"
+        assert find_near_duplicate(s, "0000000000000000") is None
+        cap = find_caption_duplicate(s, "sunset VIBES over the city #other")
+        assert cap is not None
+        assert find_caption_duplicate(s, "totally different words here now") is None
+        assert find_caption_duplicate(s, "short") is None
+
+
+class TestBestSlots:
+    def test_ranking_by_avg_views(self):
+        from app.services.best_slots import aggregate_slots
+
+        slots = aggregate_slots([(18, 100), (18, 200), (9, 50), (21, 1000)])
+        assert [s["hour_utc"] for s in slots] == [21, 18, 9]
+        assert slots[0]["avg_views"] == 1000 and slots[0]["tehran"] == "00:30"
+
+    def test_tehran_conversion(self):
+        from app.services.best_slots import tehran_label
+
+        assert tehran_label(18) == "21:30" and tehran_label(0) == "03:30"
+        assert tehran_label(20, 30) == "00:00"
+
+    def test_limit_respected(self):
+        from app.services.best_slots import aggregate_slots
+
+        assert len(aggregate_slots([(h, 10) for h in range(12)], limit=5)) == 5
+
+
+class TestViralScore:
+    def test_ideal_video_ready(self):
+        from app.services.viral_score import score_video_meta
+
+        out = score_video_meta({
+            "duration": 15, "width": 1080, "height": 1920, "has_audio": True,
+            "audio_track": "trend1", "caption": "hi", "hashtags": "#a #b #c",
+            "has_effect": True, "has_custom_cover": True, "has_cover": True,
+        })
+        assert out["score"] == 100 and out["verdict"] == "ready"
+        assert out["suggestions"] == []
+
+    def test_weak_video_risky(self):
+        from app.services.viral_score import score_video_meta
+
+        out = score_video_meta({
+            "duration": 90, "width": 1920, "height": 1080, "has_audio": False,
+            "audio_track": None, "caption": "", "hashtags": "",
+            "has_effect": False, "has_custom_cover": False, "has_cover": False,
+        })
+        assert out["verdict"] == "risky" and len(out["suggestions"]) >= 4
+
+    def test_middle_ground_needs_work(self):
+        from app.services.viral_score import score_video_meta
+
+        out = score_video_meta({
+            "duration": 45, "width": 720, "height": 1280, "has_audio": True,
+            "audio_track": None, "caption": "cap", "hashtags": "#a",
+            "has_effect": False, "has_custom_cover": False, "has_cover": True,
+        })
+        assert out["verdict"] == "needs-work"
+        assert sum(b["points"] for b in out["breakdown"]) == out["score"]

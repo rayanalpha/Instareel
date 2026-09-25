@@ -165,6 +165,20 @@ async def time_slots(_: str = Depends(get_current_admin), db: AsyncSession = Dep
     return await analytics_service.time_slot_performance(db)
 
 
+@analytics_router.get("/best-slots")
+async def best_slots(
+    account_id: int = Query(...),
+    limit: int = Query(default=5, ge=1, le=12),
+    _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Golden-hour suggestion for one account (personalized when it has
+    enough posted history, global fallback otherwise). Read-only."""
+    from app.services import best_slots as slots
+
+    return await slots.best_slots_for_account(db, account_id, limit=limit)
+
+
 @analytics_router.get("/export")
 async def export_csv(_: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(Post, Video).join(Video, Video.id == Post.video_id).where(Post.status == PostStatus.posted).order_by(desc(Post.posted_at)).limit(2000))).all()

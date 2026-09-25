@@ -165,9 +165,18 @@ def execute_post(self, post_id: int):
                         note = f" — rotated proxy, cooldown {hours}h"
                     else:
                         note = f" — no spare proxy, cooldown {hours}h"
+                else:
+                    # Any other repeated failure (auth, proxy, IG 500s):
+                    # the Health Guard parks the account after a streak
+                    # instead of burning the next posts on it.
+                    from app.services.account_health import maybe_park_account_sync
+
+                    if maybe_park_account_sync(s, account, now):
+                        kind = "auto_park"
+                        note = " — auto-parked 6h after 5 consecutive failures"
             username = account.username
             account_id = account.id
-            status_changed = kind in ("challenge", "throttled")
+            status_changed = kind in ("challenge", "throttled", "auto_park")
             new_status = account.status
             s.commit()
             if note:

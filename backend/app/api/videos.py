@@ -139,11 +139,28 @@ async def upload_video(
     except Exception:
         os.remove(raw_path)
         raise HTTPException(422, "File is not a valid video (ffprobe validation failed)")
+    # Visual dedupe (best-effort, same check as source ingest): the same
+    # clip under a different filename is a 409, not a silent double.
+    phash: str | None = None
+    try:
+        from app.services import media_hash as mh
+
+        phash = await asyncio.wait_for(asyncio.to_thread(mh.frame_hash, raw_path), timeout=150)
+        if phash:
+            near_id = await asyncio.to_thread(mh.find_near_duplicate_id, phash)
+            if near_id is not None:
+                os.remove(raw_path)
+                raise HTTPException(409, f"Near-duplicate of video #{near_id} (visual hash)")
+    except HTTPException:
+        raise
+    except Exception:
+        phash = None
     video = Video(
         original_filename=file.filename or tmp_name,
         raw_path=raw_path,
         file_size=size,
         md5_hash=digest,
+        phash=phash,
         duration=probe.get("duration"),
     )
     db.add(video)
@@ -272,6 +289,14 @@ async def processing_status(video_id: int, _: str = Depends(get_current_admin), 
         raise HTTPException(404, "Video not found")
     progress = await realtime.get_progress(video_id)
     return {"status": v.status.value, "progress": progress, "failed_reason": v.failed_reason}
+
+
+@router.get("/{video_id}/score")
+async def viral_score(video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    """Pre-flight viral score (warn-only gate — never blocks posting)."""
+    from app.services import viral_score as vs
+
+    return await vs.score_video(db, video_id)
 
 
 @router.put("/{video_id}/settings", response_model=VideoOut)

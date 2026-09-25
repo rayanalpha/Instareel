@@ -403,6 +403,23 @@ async def activate(
     return {"ok": True}
 
 
+@router.get("/{account_id}/health")
+async def account_health(
+    account_id: int, _: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(__import__("app.api.deps", fromlist=["get_db"]).get_db),
+):
+    """0-100 health score + level + reasons (Health Guard)."""
+    from app.services import account_health as health
+
+    acc = await db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    out = await health.evaluate_account(db, account_id)
+    if out is None:
+        raise HTTPException(404, "Account not found")
+    return out
+
+
 @router.get("/{account_id}/analytics")
 async def account_analytics(
     account_id: int, _: str = Depends(get_current_admin),

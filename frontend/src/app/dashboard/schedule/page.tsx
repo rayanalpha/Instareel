@@ -1,7 +1,9 @@
 "use client";
 import { Fragment, useState } from "react";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
+import { toast } from "@/components/toast";
 import { useAccounts, useApiMutation, useCaptions, useEffects, useRules, useVideos } from "@/hooks/use-api";
+import { api } from "@/lib/api";
 import { dayLabel } from "@/lib/utils";
 import type { Account, Caption, Effect, ScheduleRule, Video } from "@/types/models";
 
@@ -25,7 +27,27 @@ export default function SchedulePage() {
   const pin = useApiMutation("post", [["rules"]], "Pin updated");
   const update = useApiMutation("put", [["rules"]], "Rule updated");
   const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", prefer_source_caption: true, pinned_video_id: "" });
+  const [suggesting, setSuggesting] = useState(false);
   const list = (rules ?? []) as ScheduleRule[];
+
+  async function suggestBestTime() {
+    if (!form.account_id || suggesting) return;
+    setSuggesting(true);
+    try {
+      const { data } = await api.get(`/analytics/best-slots?account_id=${form.account_id}`);
+      const top = (data.slots ?? [])[0];
+      if (!top) {
+        toast("error", "No posted history yet — post a few reels first");
+        return;
+      }
+      setForm({ ...form, hour: top.hour_utc, minute: 0 });
+      toast("success", `Best slot: ${top.tehran} Tehran (${top.avg_views} avg views)${data.personalized ? "" : " — global fallback"}`);
+    } catch {
+      toast("error", "Could not load suggestions");
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   function submit() {
     create.mutate({
@@ -103,6 +125,16 @@ export default function SchedulePage() {
               <option value="">Auto-select</option>
               {((accounts ?? []) as Account[]).map((a) => <option key={a.id} value={a.id}>@{a.username}</option>)}
             </select>
+          </Field>
+          <Field label="Golden hour">
+            <button
+              className="btn-ghost w-full !py-2 text-xs"
+              disabled={!form.account_id || suggesting}
+              title={form.account_id ? "Fill hour/minute with this account's best posting time" : "Pick an account first"}
+              onClick={suggestBestTime}
+            >
+              {suggesting ? "Checking…" : "✨ Suggest best time"}
+            </button>
           </Field>
           <Field label="Effect">
             <select className="input max-w-full" value={form.preferred_effect} disabled={!!form.pinned_video_id} title={form.pinned_video_id ? "Ignored while a video is pinned" : ""} onChange={(e) => setForm({ ...form, preferred_effect: e.target.value })}>

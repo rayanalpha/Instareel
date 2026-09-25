@@ -12,6 +12,7 @@ export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [acc, setAcc] = useState<Account | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [health, setHealth] = useState<{ score: number; level: string; reasons: string[]; fail_streak: number } | null>(null);
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -20,15 +21,17 @@ export default function AccountDetailPage() {
 
   async function load() {
     try {
-      const [{ data: a }, { data: s }, { data: p }] = await Promise.all([
+      const [{ data: a }, { data: s }, { data: p }, { data: h }] = await Promise.all([
         api.get(`/accounts/${id}`),
         api.get(`/accounts/${id}/analytics`),
         api.get("/proxies"),
+        api.get(`/accounts/${id}/health`).catch(() => ({ data: null })),
       ]);
       setLoadError("");
       setAcc(a);
       setStats(s);
       setProxies(p ?? []);
+      setHealth(h);
     } catch {
       setLoadError("Failed to load account.");
     }
@@ -47,15 +50,17 @@ export default function AccountDetailPage() {
       if (inflight || cancelled || document.hidden) return;
       inflight = true;
       try {
-        const [{ data: a }, { data: s }, { data: p }] = await Promise.all([
+        const [{ data: a }, { data: s }, { data: p }, { data: h }] = await Promise.all([
           api.get(`/accounts/${id}`),
           api.get(`/accounts/${id}/analytics`),
           api.get("/proxies"),
+          api.get(`/accounts/${id}/health`).catch(() => ({ data: null })),
         ]);
         if (!cancelled) {
           setAcc(a);
           setStats(s);
           setProxies(p ?? []);
+          setHealth(h);
         }
       } catch { /* next tick */ } finally {
         inflight = false;
@@ -102,6 +107,27 @@ export default function AccountDetailPage() {
           <Card key={k as string} className="overflow-hidden"><p title={String(v ?? "")} className="truncate text-2xl font-extrabold">{v as string}</p><p className="text-xs text-zinc-500">{k}</p></Card>
         ))}
       </div>
+      {health && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle>Account health</CardTitle>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+              health.level === "healthy" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+              : health.level === "watch" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+              : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+            }`}>
+              {health.score} · {health.level}
+            </span>
+            {health.fail_streak > 0 && <span className="text-xs text-zinc-500">{health.fail_streak} recent failures</span>}
+          </div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
+            {(health.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}
+          </ul>
+          {health.level === "critical" && (
+            <p className="mt-1 text-xs text-zinc-500">5 consecutive failures auto-park the account for 6h — fix the cause (proxy/session), then re-activate.</p>
+          )}
+        </Card>
+      )}
       <Card>
         <CardTitle>Connection</CardTitle>
         <div className="grid gap-3 md:grid-cols-3">

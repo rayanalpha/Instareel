@@ -40,6 +40,10 @@ class Video(Base, TimestampMixin):
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     md5_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Perceptual hash (64-bit dHash of a middle frame, hex). Catches
+    # near-duplicates the md5 misses: same clip re-uploaded under a
+    # different media id, cropped, or re-encoded. NULL = pre-0015 row.
+    phash: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     status: Mapped[VideoStatus] = mapped_column(Enum(VideoStatus), default=VideoStatus.uploaded)
     # Original caption from a video source (IG page ingest) — posted verbatim
     # when the firing schedule rule prefers source captions.

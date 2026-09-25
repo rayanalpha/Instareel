@@ -961,3 +961,93 @@ class TestPostingPipeline:
         rows = {r["name"]: r for r in c.get("/api/v1/analytics/effects").json()}
         assert rows["fx_a"]["views"] == 10 and rows["fx_b"]["views"] == 90
         assert rows["fx_zero"]["posts"] == 0 and rows["fx_zero"]["views"] == 0
+
+
+class TestGuardianEndpoints:
+    def test_account_health_shape_and_404(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="hp1", password_enc="x"))
+                s.add(Video(original_filename="h.mp4", raw_path="/tmp/h.mp4",
+                            md5_hash="hv", status=VideoStatus.processed))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "hp1"))).scalar_one()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "hv"))).scalar_one()
+                s.add(Post(video_id=vid.id, account_id=acc.id, status=PostStatus.failed))
+                await s.commit()
+                return acc.id
+
+        import asyncio
+
+        acc_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.get(f"/api/v1/accounts/{acc_id}/health")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["account_id"] == acc_id and body["username"] == "hp1"
+        assert body["level"] == "healthy" and body["fail_streak"] == 1
+        assert isinstance(body["reasons"], list) and body["reasons"]
+        assert c.get("/api/v1/accounts/999999/health").status_code == 404
+
+    def test_best_slots_personalized_and_fallback(self, client):
+        import datetime as dt
+
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Account(username="sl1", password_enc="x"))
+                s.add(Account(username="sl2", password_enc="x"))
+                for h in ("s1", "s2", "s3"):
+                    s.add(Video(original_filename=f"{h}.mp4", raw_path=f"/tmp/{h}.mp4",
+                                md5_hash=h, status=VideoStatus.processed))
+                await s.commit()
+                acc = (await s.execute(select(Account).where(Account.username == "sl1"))).scalar_one()
+                vids = (await s.execute(select(Video))).scalars().all()
+                base = dt.datetime(2026, 1, 5, 0, 0, tzinfo=dt.timezone.utc)  # a Monday
+                for v, (hour, views) in zip(vids, [(18, 100), (18, 300), (9, 10)]):
+                    s.add(Post(video_id=v.id, account_id=acc.id, status=PostStatus.posted,
+                               posted_at=base.replace(hour=hour), views_7d=views))
+                await s.commit()
+                return acc.id
+
+        import asyncio
+
+        acc_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.get(f"/api/v1/analytics/best-slots?account_id={acc_id}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["personalized"] is True
+        assert body["slots"][0]["hour_utc"] == 18
+        assert body["slots"][0]["tehran"] == "21:30"
+        # Fresh account borrows the global fallback, honestly labeled.
+        other = c.get("/api/v1/accounts").json()
+        other_id = [a["id"] for a in other if a["username"] == "sl2"][0]
+        r2 = c.get(f"/api/v1/analytics/best-slots?account_id={other_id}")
+        assert r2.status_code == 200 and r2.json()["personalized"] is False
+        assert c.get("/api/v1/analytics/best-slots?account_id=999999").status_code == 404
+
+    def test_video_score_with_unprobable_file(self, client):
+        c, maker, _ = client
+
+        async def seed():
+            async with maker() as s:
+                s.add(Video(original_filename="sc.mp4", raw_path="/tmp/does-not-exist.mp4",
+                            md5_hash="scv", status=VideoStatus.processed,
+                            duration=15.0, source_caption="nice day #reels #sun #fun"))
+                await s.commit()
+                vid = (await s.execute(select(Video).where(Video.md5_hash == "scv"))).scalar_one()
+                return vid.id
+
+        import asyncio
+
+        vid_id = asyncio.get_event_loop().run_until_complete(seed())
+        r = c.get(f"/api/v1/videos/{vid_id}/score")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["video_id"] == vid_id
+        assert body["verdict"] in ("ready", "needs-work", "risky")
+        assert sum(b["points"] for b in body["breakdown"]) == body["score"]
+        assert any("probe" in s for s in body["suggestions"])
+        assert c.get("/api/v1/videos/999999/score").status_code == 404
