@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, apiBase } from "@/lib/api";
 import { Card, CardTitle, EmptyState, Field, Spinner, StatusBadge } from "@/components/ui";
 import { LivePreview } from "@/components/live-preview";
 import { useApiMutation, useAudios, useEffects } from "@/hooks/use-api";
@@ -100,23 +100,19 @@ export default function VideoDetailPage() {
     /* eslint-disable-next-line */
   }, [id]);
 
-  // Fetch the preview through the same-origin /api proxy as a blob —
-  // <video> tags can't send the Authorization header, and cross-origin
-  // media requests get blocked by Chrome's ORB.
+  // Progressive streaming via a short-lived signed token: the <video> tag
+  // range-requests the file itself (starts in <1s, seeks work), instead of
+  // downloading the whole multi-MB blob up front. <video> can't send the
+  // Authorization header, hence the token — see preview-token endpoint.
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
     setPreviewUrl(null);
     setPreviewError("");
     (async () => {
       try {
-        const res = await api.get(`/videos/${id}/preview`, {
-          responseType: "blob",
-          timeout: 120000,
-        });
+        const { data } = await api.get(`/videos/${id}/preview-token`, { timeout: 15000 });
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(res.data);
-        setPreviewUrl(objectUrl);
+        setPreviewUrl(`${apiBase()}/api/v1/videos/${id}/preview?token=${encodeURIComponent(data.token)}`);
       } catch (e: unknown) {
         if (!cancelled) {
           const status = (e as { response?: { status?: number } })?.response?.status;
@@ -126,7 +122,6 @@ export default function VideoDetailPage() {
     })();
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [id, video?.status]);
 

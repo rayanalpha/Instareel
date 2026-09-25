@@ -1139,6 +1139,22 @@ class TestAnonIngest:
         assert source_tasks._install_cover(str(tmp_path / "nope.png"), dirs) is None
 
 
+class TestPreviewTokens:
+    def test_roundtrip_and_wrong_video_rejected(self):
+        from app.core.security import create_preview_token, verify_preview_token
+
+        tok = create_preview_token(42)
+        assert verify_preview_token(tok, 42) is True
+        assert verify_preview_token(tok, 43) is False
+        assert verify_preview_token("garbage", 42) is False
+        assert verify_preview_token(create_preview_token(7), 7) is True
+
+    def test_access_token_is_not_a_preview_token(self):
+        from app.core.security import create_access_token, verify_preview_token
+
+        assert verify_preview_token(create_access_token("admin"), 1) is False
+
+
 class TestMakeClientTimeout:
     def test_request_timeout_enforced_after_stale_session_load(self, monkeypatch, tmp_path):
         import json

@@ -309,11 +309,44 @@ def _serve(path: str | None, media_type: str | None = None):
 
 
 @router.get("/{video_id}/preview")
-async def preview(video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+async def preview(
+    video_id: int,
+    request: Request,
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    # <video> tags can't send Authorization headers, so playback uses a
+    # short-lived signed token (see preview-token). Direct dashboard calls
+    # still use the admin JWT. Either one must be valid — never open.
+    from fastapi.security import HTTPAuthorizationCredentials
+    from fastapi import status as _status
+
+    from app.api.deps import bearer
+    from app.core.security import decode_token, verify_preview_token
+
+    authorized = token is not None and verify_preview_token(token, video_id)
+    if not authorized:
+        creds: HTTPAuthorizationCredentials | None = await bearer(request)
+        if creds is None or not creds.credentials:
+            raise HTTPException(status_code=_status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        try:
+            decode_token(creds.credentials, expected_type="access")
+        except ValueError as exc:
+            raise HTTPException(status_code=_status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     v = await db.get(Video, video_id)
     if not v:
         raise HTTPException(404, "Video not found")
     return _serve(v.processed_path or v.raw_path)
+
+
+@router.get("/{video_id}/preview-token")
+async def preview_token(video_id: int, _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from app.core.security import create_preview_token
+
+    v = await db.get(Video, video_id)
+    if not v:
+        raise HTTPException(404, "Video not found")
+    return {"token": create_preview_token(video_id)}
 
 
 @router.get("/{video_id}/thumbnail")

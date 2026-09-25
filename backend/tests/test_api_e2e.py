@@ -252,8 +252,16 @@ class TestVideos:
         body = ok.json()
         assert body["effect_preset"] == "clean_natural" and body["trim_start"] == 0.5
         assert c.get(f"/api/v1/videos/{vid}/status").json()["status"] == "uploaded"
-        pv = c.get(f"/api/v1/videos/{vid}/preview")
+        # Preview streams via short-lived token (no auth header, like <video>).
+        assert c.get(f"/api/v1/videos/{vid}/preview").status_code == 401
+        tok = c.get(f"/api/v1/videos/{vid}/preview-token").json()["token"]
+        pv = c.get(f"/api/v1/videos/{vid}/preview?token={tok}")
         assert pv.status_code == 200 and pv.headers["content-type"] == "video/mp4"
+        assert c.get(f"/api/v1/videos/{vid}/preview?token=garbage").status_code == 401
+        assert c.get(f"/api/v1/videos/999999/preview?token={tok}").status_code == 401
+        # Browsers range-request the stream (progressive playback, seeking).
+        rng = c.get(f"/api/v1/videos/{vid}/preview?token={tok}", headers={"Range": "bytes=0-99"})
+        assert rng.status_code == 206 and "content-range" in rng.headers
         # Duplicate content rejected.
         with open(src, "rb") as f:
             assert c.post("/api/v1/videos/upload", files={"file": ("v.mp4", f, "video/mp4")}, timeout=120).status_code == 409
@@ -719,8 +727,13 @@ class TestResources:
 
     def test_preview_thumbnail_404(self, client):
         c, _, _ = client
-        assert c.get("/api/v1/videos/999999/preview").status_code == 404
+        # Unauthenticated preview reveals nothing (401 before any existence check).
+        assert c.get("/api/v1/videos/999999/preview").status_code == 401
         assert c.get("/api/v1/videos/999999/thumbnail").status_code == 404
+        tok = c.post("/api/v1/auth/login",
+                     json={"username": "admin", "password": "changeme-please"}).json()["access_token"]
+        h = {"Authorization": f"Bearer {tok}"}
+        assert c.get("/api/v1/videos/999999/preview", headers=h).status_code == 404
 
     def test_delete_video_with_posts_guarded(self, client):
         c, maker, _ = client

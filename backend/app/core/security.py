@@ -67,3 +67,17 @@ def decode_token(token: str, expected_type: str = "access") -> str:
         # A structurally valid JWT without subject must 401, never 500.
         raise ValueError("Invalid token")
     return str(sub)
+
+
+def create_preview_token(video_id: int) -> str:
+    """Short-lived stream token for <video> tags, which cannot send the
+    Authorization header. Single-video, 10 minutes, signed with SECRET_KEY."""
+    return _encode({"sub": f"preview:{video_id}", "type": "preview"}, dt.timedelta(minutes=10))
+
+
+def verify_preview_token(token: str, video_id: int) -> bool:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return False
+    return payload.get("type") == "preview" and payload.get("sub") == f"preview:{video_id}"
