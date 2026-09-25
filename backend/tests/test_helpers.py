@@ -70,9 +70,35 @@ class TestDeviceSettings:
 class TestFfmpegBuilder:
     def test_crop_scale_chain_always_present(self):
         fc = build_filter()
-        assert "crop=ih*9/16" in fc
+        # Conditional 9:16 center-crop (either axis may overflow) + upscale.
+        assert "crop=min(iw\\,ih*9/16):min(ih\\,iw*16/9)" in fc
         assert "scale=720:1280" in fc
         assert "overlay" not in fc
+
+    def test_crop_commas_escaped_but_colons_not(self):
+        fc = build_filter()
+        crop = fc.split("crop=")[1].split(",scale=")[0]
+        assert "\\," in crop  # min() arg separators
+        assert crop.count(":") == 3  # w:h:x:y structure intact
+
+    def test_center_crop_math_fits_all_aspect_ratios(self):
+        import re
+
+        fc = build_filter()
+        crop = fc.split("crop=")[1].split(",scale=")[0]
+        w_e, h_e, x_e, y_e = crop.split(":")
+
+        def ev(expr, iw, ih):
+            e = expr.replace("\\,", ",").replace("iw", str(iw)).replace("ih", str(ih))
+            assert re.fullmatch(r"[\d\.\+\-\*/\(\), min]+", e), e
+            return eval(e, {"__builtins__": {}}, {"min": min})  # noqa: S307 — test-only, guarded charset
+
+        cases = [(1280, 720), (720, 1280), (356, 638), (640, 640),
+                 (1080, 1920), (1920, 1080), (320, 568), (600, 1067)]
+        for iw, ih in cases:
+            ow, oh, x, y = (int(ev(e, iw, ih)) for e in (w_e, h_e, x_e, y_e))
+            assert 0 <= x and 0 <= y and x + ow <= iw and y + oh <= ih, (iw, ih, ow, oh, x, y)
+            assert abs(ow / oh - 9 / 16) < 0.02, (iw, ih, ow, oh)
 
     def test_effect_and_custom_filters_appended(self):
         fc = build_filter(effect_filter="eq=saturation=1.2", custom_filters="unsharp")
@@ -162,7 +188,7 @@ class TestDefaultEffects:
 
         for p in DEFAULT_EFFECT_PRESETS:
             fc = build_filter(effect_filter=p["ffmpeg_filter"])
-            assert "crop=ih*9/16" in fc and "scale=720:1280" in fc, p["name"]
+            assert "min(iw\\,ih*9/16)" in fc and "scale=720:1280" in fc, p["name"]
             cmd = build_command("in.mp4", "out.mp4", effect_filter=p["ffmpeg_filter"])
             assert "libx264" in " ".join(cmd), p["name"]
 

@@ -80,9 +80,14 @@ def build_filter(
 ) -> str:
     """Return the video filter_complex (single input, [outv] output)."""
     parts: list[str] = []
-    # Center-crop to 9:16 then scale to 720x1280.
+    # Center-crop to 9:16, whichever axis overflows: landscape (and exact
+    # 9:16) crops the sides, narrower-than-9:16 portraits crop top/bottom.
+    # A fixed crop=ih*9/16:... dies with "Invalid too big ... size" on the
+    # narrow ones (real case: 638px tall but <358px wide). Commas inside
+    # min() are backslash-escaped — bare commas separate filters.
     parts.append(
-        "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,"
+        "crop=min(iw\\,ih*9/16):min(ih\\,iw*16/9)"
+        ":(iw-min(iw\\,ih*9/16))/2:(ih-min(ih\\,iw*16/9))/2,"
         f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=increase,"
         f"crop={TARGET_W}:{TARGET_H}"
     )
