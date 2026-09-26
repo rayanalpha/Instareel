@@ -1,4 +1,5 @@
 """Analytics, logs, global settings, WebSocket feed."""
+import asyncio
 import csv
 import datetime as dt
 import io
@@ -301,22 +302,28 @@ async def test_instagram(
 
 ws_router = APIRouter()
 
+#: App-level heartbeat. The server sends {"event": "ping"} every
+#: WS_PING_INTERVAL seconds of idleness and expects any frame back within
+#: WS_PONG_TIMEOUT — a missing reply means a half-open socket, which is
+#: closed so the client reconnects. Each cycle also re-validates the access
+#: token: tokens expire after JWT_EXPIRE_MINUTES, and a long-lived socket
+#: must not keep serving a stale session — on expiry the server closes with
+#: 4401 and the client reconnects with a fresh token.
+WS_PING_INTERVAL = 25.0
+WS_PONG_TIMEOUT = 10.0
+
 
 @ws_router.websocket("/ws")
 async def ws_feed(websocket: WebSocket):
     await websocket.accept()
     # Auth arrives as the first message frame ({ "token": ... }), never as a
-    # URL query param (URLs are written to access logs). Legacy ?token= URLs
-    # are still honored during the transition, then removed.
-    token = websocket.query_params.get("token", "")
-    if not token:
-        try:
-            import asyncio as _asyncio
-
-            raw = await _asyncio.wait_for(websocket.receive_text(), timeout=10)
-            token = (json.loads(raw) or {}).get("token", "")
-        except Exception:
-            token = ""
+    # URL query param (URLs are written to access logs).
+    token = ""
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+        token = (json.loads(raw) or {}).get("token", "")
+    except Exception:
+        token = ""
     try:
         decode_token(token, expected_type="access")
     except ValueError:
@@ -329,9 +336,25 @@ async def ws_feed(websocket: WebSocket):
         await pubsub.subscribe("igfunnel:events")
         await websocket.send_text(json.dumps({"event": "connected"}))
         while True:
-            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=20.0)
+            msg = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=WS_PING_INTERVAL
+            )
             if msg and msg.get("data"):
                 await websocket.send_text(msg["data"])
+                continue
+            # Idle cycle → heartbeat + token re-validation.
+            await websocket.send_text(json.dumps({"event": "ping"}))
+            try:
+                decode_token(token, expected_type="access")
+            except ValueError:
+                # Token expired mid-session — force reconnect with a fresh one.
+                await websocket.close(code=4401)
+                return
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=WS_PONG_TIMEOUT)
+            except asyncio.TimeoutError:
+                await websocket.close(code=4408)  # heartbeat timeout
+                return
     except WebSocketDisconnect:
         pass
     except Exception:
