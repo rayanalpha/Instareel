@@ -265,6 +265,37 @@ def pool_allows_country(spec_country: str, source_default: str, pool_country: st
     return have == want
 
 
+def _park_accounts_for_purged_proxies(session, proxy_ids: list[int], reason: str) -> int:
+    """Park accounts whose proxy is being deleted: unlink + disable them.
+
+    Unlinking alone is dangerous — account_reachable() treats proxy_id=None
+    as "direct connection OK" and the account would suddenly post from the
+    server's datacenter IP (challenge / geo-hop risk). Parking sets
+    status=disabled so nothing posts until an admin assigns a healthy proxy
+    and re-enables the account. Returns the parked count.
+    """
+    from app.models import Account, AccountStatus
+
+    if not proxy_ids:
+        return 0
+    parked = 0
+    stamp = _now().strftime("%Y-%m-%d %H:%M UTC")
+    for acc in session.execute(select(Account).where(Account.proxy_id.in_(proxy_ids))).scalars().all():
+        acc.proxy_id = None  # required before the proxy row can be deleted (FK)
+        acc.status = AccountStatus.disabled
+        note = f"[{stamp}] Auto-parked: {reason}. Assign a healthy proxy and re-enable to resume posting."
+        acc.notes = (acc.notes + "\n" + note) if acc.notes else note
+        parked += 1
+        log_event_sync(
+            "WARNING",
+            "proxy",
+            f"Account '{acc.username}' auto-parked: {reason}",
+            {"account_id": acc.id},
+        )
+        publish_sync("account_status_change", {"account_id": acc.id, "status": "disabled"})
+    return parked
+
+
 def purge_stale_auto_proxies(
     session,
     max_age_days: int = POOL_PURGE_AFTER_DAYS,
@@ -282,8 +313,9 @@ def purge_stale_auto_proxies(
           healing success in between) -> delete at the next cycle
         - retired: disabled leftovers past retention -> delete
     Proven-dead rows go immediately: the 5-fail streak IS the proof, keeping
-    them longer only clutters the pool. Parked accounts are unlinked first
-    so no dangling proxy_id survives the delete.
+    them longer only clutters the pool. Accounts on purged proxies are
+    PARKED (disabled) first — never silently unlinked, which would make them
+    post from the server's datacenter IP.
     """
     from sqlalchemy import and_ as _and
     from sqlalchemy import or_ as _or
@@ -316,10 +348,9 @@ def purge_stale_auto_proxies(
     ).scalars().all()
     if rows:
         gone_ids = [p.id for p in rows]
-        for acc in session.execute(
-            select(Account).where(Account.proxy_id.in_(gone_ids))
-        ).scalars().all():
-            acc.proxy_id = None
+        _park_accounts_for_purged_proxies(
+            session, gone_ids, "its auto proxy was purged from the pool"
+        )
         for p in rows:
             session.delete(p)
         session.commit()
@@ -349,6 +380,10 @@ def cap_auto_pool(session, max_auto: int = POOL_MAX_AUTO) -> int:
             ).limit(excess)
         )
     ).scalars().all()
+    gone_ids = [p.id for p in rows]
+    _park_accounts_for_purged_proxies(
+        session, gone_ids, "its auto proxy was trimmed by the pool cap"
+    )
     for p in rows:
         session.delete(p)
     session.commit()
