@@ -1,10 +1,33 @@
 """Central application settings (pydantic-settings, loaded from .env)."""
+import os
 from functools import lru_cache
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./data/app.db"
 DEFAULT_SYNC_DATABASE_URL = "sqlite:///./data/app.db"
+
+
+def _sqlite_file_path(db_url: str) -> str | None:
+    """Filesystem path SQLAlchemy will open for a sqlite URL.
+
+    Returns None for non-sqlite URLs, empty databases, or URLs SQLAlchemy
+    itself cannot parse (it will raise its own error at engine creation).
+    """
+    try:
+        from sqlalchemy.engine import make_url
+
+        url = make_url(db_url)
+    except Exception:
+        return None
+    if url.get_backend_name() != "sqlite":
+        return None
+    return url.database or None
+
+
+def _running_in_container() -> bool:
+    """True inside a Docker container (/.dockerenv is created by the runtime)."""
+    return os.path.exists("/.dockerenv")
 
 
 class Settings(BaseSettings):
@@ -46,13 +69,36 @@ class Settings(BaseSettings):
     IG_PRE_POST_DELAY_MAX: int = 120
 
     @model_validator(mode="after")
-    def _derive_sync_url(self):
-        """If only the async URL was customized, derive the sync one from it."""
+    def _derive_and_validate_db_urls(self):
+        """If only the async URL was customized, derive the sync one from it.
+
+        Inside a container, a *relative* sqlite path is almost always a
+        misconfiguration: it resolves against the image WORKDIR (/code), not
+        the /data volume, so the app crash-loops on startup with a cryptic
+        sqlalchemy "unable to open database file". Fail fast here with an
+        actionable message instead. (Relative paths stay legal outside
+        containers — local dev uses them on purpose.)
+        """
         if self.SYNC_DATABASE_URL == DEFAULT_SYNC_DATABASE_URL and self.DATABASE_URL != DEFAULT_DATABASE_URL:
             if "+aiosqlite" in self.DATABASE_URL:
                 self.SYNC_DATABASE_URL = self.DATABASE_URL.replace("+aiosqlite", "")
             elif "+asyncpg" in self.DATABASE_URL:
                 self.SYNC_DATABASE_URL = self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+
+        if _running_in_container():
+            for label in ("DATABASE_URL", "SYNC_DATABASE_URL"):
+                db_url = getattr(self, label)
+                path = _sqlite_file_path(db_url)
+                if path and path != ":memory:" and not os.path.isabs(path):
+                    raise ValueError(
+                        f"{label} points at a relative SQLite path {path!r}. "
+                        "Inside the container this resolves against the image "
+                        "WORKDIR (/code) — not the /data volume — so the database "
+                        "file won't be found. Use an absolute container path "
+                        "instead, e.g. "
+                        "DATABASE_URL=sqlite+aiosqlite:////data/app.db "
+                        "(note the 4 slashes). See .env.example."
+                    )
         return self
 
     @model_validator(mode="after")
