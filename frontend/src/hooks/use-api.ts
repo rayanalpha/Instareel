@@ -109,6 +109,10 @@ export function useLogs() {
 export function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => get("/settings") });
 }
+export function useTimezone() {
+  // IANA zone the schedule-rule hours are interpreted in (for labels).
+  return useQuery({ queryKey: ["timezone"], queryFn: () => get("/system/timezone"), staleTime: 60000 });
+}
 export function useServerStats() {
   // Live host/container resources; 5s poll is the point of the page.
   // Skipped in background tabs by the browser's interval throttling.

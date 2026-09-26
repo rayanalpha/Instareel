@@ -11,7 +11,9 @@ celery.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
+    # Beat crontabs (daily reset, cleanup, …) tick in the schedule timezone
+    # too, so "midnight" means the user's midnight, like rule hours do.
+    timezone=settings.SCHEDULE_TZ,
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,

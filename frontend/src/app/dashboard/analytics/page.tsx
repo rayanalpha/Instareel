@@ -113,16 +113,16 @@ export default function AnalyticsPage() {
             {!slots.personalized && (
               <p className="mt-1 text-xs text-amber-600">Not enough history for @{slots.username} yet — showing global best hours instead.</p>
             )}
-            {(slots.slots as { hour_utc: number; tehran: string; posts: number; avg_views: number }[]).map((s, i) => (
+            {(slots.slots as { hour_utc: number; hour_local: number; local: string; tz: string; tz_label: string; posts: number; avg_views: number }[]).map((s, i) => (
               <div key={s.hour_utc} className="flex min-w-0 items-center gap-2 border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${i === 0 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}>
-                  {s.tehran}
+                  {s.local}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-zinc-500">Tehran · {s.hour_utc}:00 UTC</span>
+                <span className="min-w-0 flex-1 truncate text-zinc-500">{s.tz_label} · {s.hour_utc}:00 UTC</span>
                 <span className="shrink-0 whitespace-nowrap text-zinc-500">{fmt(s.avg_views)} avg views · {s.posts} posts</span>
               </div>
             ))}
-            <p className="mt-1 text-xs text-zinc-500">Set a schedule rule to the top hour (Tehran time) for this account.</p>
+            <p className="mt-1 text-xs text-zinc-500">Set a schedule rule to the top hour ({(slots.slots as { tz_label: string }[])[0]?.tz_label} time) for this account.</p>
           </>
         )}
       </Card>

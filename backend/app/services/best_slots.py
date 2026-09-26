@@ -4,8 +4,9 @@ Builds on the analytics already collected (posted_at + views_7d per
 post). Aggregation runs in Python over plain rows — deliberately NOT
 EXTRACT(dow/hour) in SQL, so the same code serves SQLite and Postgres.
 
-Hours are UTC (posts store naive-UTC). Tehran is UTC+3:30 year-round
-(no DST since 2022), so the UI-facing label is a fixed +3:30 shift.
+Hours are stored UTC; the UI-facing labels are wall-clock in SCHEDULE_TZ
+(the same zone schedule-rule hours are interpreted in), so the suggested
+hour can be copied straight into the rule form.
 
 Design rules (anti-interference):
 - Read-only: no schema change, no tick change. Suggestions surface in
@@ -18,15 +19,31 @@ Design rules (anti-interference):
 """
 import datetime as dt
 
+from app.config import settings
+
 MIN_POSTS_PERSONALIZED = 3
 DEFAULT_LIMIT = 5
-TEHRAN_OFFSET = dt.timedelta(hours=3, minutes=30)
 
 
-def tehran_label(utc_hour: int, utc_minute: int = 0) -> str:
-    """'21:30' style Tehran wall-clock for a UTC hour."""
-    t = (dt.datetime(2000, 1, 1, utc_hour, utc_minute) + TEHRAN_OFFSET).time()
-    return t.strftime("%H:%M")
+def tz_label() -> str:
+    """Short display name for the schedule zone, e.g. 'Tehran'."""
+    return settings.SCHEDULE_TZ.split("/")[-1].replace("_", " ")
+
+
+def local_label(utc_hour: int, utc_minute: int = 0) -> str:
+    """'21:30' style wall-clock in the schedule timezone for a UTC hour."""
+    from zoneinfo import ZoneInfo
+
+    t = dt.datetime(2000, 1, 1, utc_hour, utc_minute, tzinfo=dt.timezone.utc)
+    return t.astimezone(ZoneInfo(settings.SCHEDULE_TZ)).strftime("%H:%M")
+
+
+def local_hour(utc_hour: int) -> int:
+    """Rule-form hour matching a UTC hour in the schedule timezone."""
+    from zoneinfo import ZoneInfo
+
+    t = dt.datetime(2000, 1, 1, utc_hour, tzinfo=dt.timezone.utc)
+    return t.astimezone(ZoneInfo(settings.SCHEDULE_TZ)).hour
 
 
 def aggregate_slots(pairs: list[tuple[int, int]], *, limit: int = DEFAULT_LIMIT) -> list[dict]:
@@ -40,7 +57,12 @@ def aggregate_slots(pairs: list[tuple[int, int]], *, limit: int = DEFAULT_LIMIT)
         (
             {
                 "hour_utc": h,
-                "tehran": tehran_label(h),
+                # Wall-clock in the schedule zone — copy-pasteable into the
+                # rule form, which is interpreted in that same zone.
+                "hour_local": local_hour(h),
+                "local": local_label(h),
+                "tz": settings.SCHEDULE_TZ,
+                "tz_label": tz_label(),
                 "posts": len(v),
                 "avg_views": int(sum(v) / len(v)),
             }

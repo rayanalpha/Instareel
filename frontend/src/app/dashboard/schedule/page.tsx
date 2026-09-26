@@ -2,7 +2,7 @@
 import { Fragment, useState } from "react";
 import { Card, CardTitle, EmptyState, Field, QueryFailed, Spinner } from "@/components/ui";
 import { toast } from "@/components/toast";
-import { useAccounts, useApiMutation, useCaptions, useEffects, useRules, useVideos } from "@/hooks/use-api";
+import { useAccounts, useApiMutation, useCaptions, useEffects, useRules, useTimezone, useVideos } from "@/hooks/use-api";
 import { api } from "@/lib/api";
 import { dayLabel } from "@/lib/utils";
 import type { Account, Caption, Effect, ScheduleRule, Video } from "@/types/models";
@@ -29,6 +29,10 @@ export default function SchedulePage() {
   const [form, setForm] = useState({ name: "", day_of_week: -1, hour: 12, minute: 0, account_id: "", preferred_effect: "", caption_template_id: "", prefer_source_caption: true, pinned_video_id: "" });
   const [suggesting, setSuggesting] = useState(false);
   const list = (rules ?? []) as ScheduleRule[];
+  // The zone rule hours are interpreted in — shown next to every time so
+  // there is never any doubt which "12:00" a rule means.
+  const { data: tz } = useTimezone();
+  const tzNote = tz ? `${tz.label} time (${tz.utc_offset})` : "…";
 
   async function suggestBestTime() {
     if (!form.account_id || suggesting) return;
@@ -40,8 +44,8 @@ export default function SchedulePage() {
         toast("error", "No posted history yet — post a few reels first");
         return;
       }
-      setForm({ ...form, hour: top.hour_utc, minute: 0 });
-      toast("success", `Best slot: ${top.tehran} Tehran (${top.avg_views} avg views)${data.personalized ? "" : " — global fallback"}`);
+      setForm({ ...form, hour: top.hour_local, minute: 0 });
+      toast("success", `Best slot: ${top.local} ${top.tz_label} (${top.avg_views} avg views)${data.personalized ? "" : " — global fallback"}`);
     } catch {
       toast("error", "Could not load suggestions");
     } finally {
@@ -118,7 +122,7 @@ export default function SchedulePage() {
               {[0, 1, 2, 3, 4, 5, 6].map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}
             </select>
           </Field>
-          <Field label="Hour"><input className="input" type="number" min={0} max={23} value={form.hour} onChange={(e) => setForm({ ...form, hour: Number(e.target.value) })} /></Field>
+          <Field label={tz ? `Hour (${tz.label})` : "Hour"}><input className="input" type="number" min={0} max={23} value={form.hour} onChange={(e) => setForm({ ...form, hour: Number(e.target.value) })} /></Field>
           <Field label="Minute"><input className="input" type="number" min={0} max={59} value={form.minute} onChange={(e) => setForm({ ...form, minute: Number(e.target.value) })} /></Field>
           <Field label="Account">
             <select className="input max-w-full" value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
@@ -160,6 +164,7 @@ export default function SchedulePage() {
           </label>
           <div className="flex items-end"><button className="btn-primary w-full" onClick={submit} disabled={create.isPending}>{create.isPending ? "Adding…" : "Add rule"}</button></div>
         </div>
+        <p className="mt-2 text-xs text-zinc-500">Rule times are {tzNote} — change <code>SCHEDULE_TZ</code> on the server to use another zone.</p>
       </Card>
 
       {isLoading ? <Spinner /> : isError ? <QueryFailed onRetry={() => refetch()} /> : list.length === 0 ? <EmptyState title="No schedule rules" /> : (
@@ -170,7 +175,7 @@ export default function SchedulePage() {
             <div key={r.id} className="border-t border-zinc-100 py-2 text-sm first:border-0 dark:border-zinc-800">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <strong title={r.name} className="min-w-0 flex-1 break-words">{r.name}</strong>
-                <span className="shrink-0 text-zinc-500">{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}</span>
+                <span className="shrink-0 text-zinc-500" title={tz ? `Fires at this wall-clock time in ${tz.tz} (${tz.utc_offset})` : ""}>{dayLabel(r.day_of_week)} · {r.hour}:{String(r.minute).padStart(2, "0")}{tz ? ` · ${tz.label}` : ""}</span>
                 <span title={r.pinned_video_label ?? st.chip} className={`min-w-0 max-w-full truncate rounded-full px-2 py-0.5 text-xs font-semibold ${st.tone}`}>
                   {st.chip}
                 </span>

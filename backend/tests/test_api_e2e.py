@@ -1020,7 +1020,9 @@ class TestGuardianEndpoints:
         body = r.json()
         assert body["personalized"] is True
         assert body["slots"][0]["hour_utc"] == 18
-        assert body["slots"][0]["tehran"] == "21:30"
+        # Default SCHEDULE_TZ=UTC in tests: local wall-clock == UTC hour.
+        assert body["slots"][0]["local"] == "18:00"
+        assert body["slots"][0]["hour_local"] == 18
         # Fresh account borrows the global fallback, honestly labeled.
         other = c.get("/api/v1/accounts").json()
         other_id = [a["id"] for a in other if a["username"] == "sl2"][0]

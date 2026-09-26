@@ -449,6 +449,17 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def _schedule_now() -> dt.datetime:
+    """Current time in the schedule timezone.
+
+    Schedule-rule hours are wall-clock in SCHEDULE_TZ (not server/UTC time),
+    so a rule set for 12:00 fires at the user's 12:00.
+    """
+    from zoneinfo import ZoneInfo
+
+    return dt.datetime.now(ZoneInfo(settings.SCHEDULE_TZ))
+
+
 def as_aware_utc(ts: "dt.datetime | None") -> "dt.datetime | None":
     """Normalize a DB datetime for comparison (central timezone guard).
 
@@ -466,7 +477,9 @@ def as_aware_utc(ts: "dt.datetime | None") -> "dt.datetime | None":
 def due_rules(session, at: "dt.datetime | None" = None):
     from app.models import ScheduleRule
 
-    at = at or _now()
+    # at is the wall-clock in SCHEDULE_TZ — rule hours are user's hours,
+    # not the server's. An explicitly passed `at` is used as-is (tests).
+    at = at or _schedule_now()
     q = select(ScheduleRule).where(
         ScheduleRule.is_active.is_(True),
         ((ScheduleRule.day_of_week == -1) | (ScheduleRule.day_of_week == at.weekday())),

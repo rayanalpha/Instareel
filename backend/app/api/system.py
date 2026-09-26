@@ -39,6 +39,24 @@ async def system_stats(_: str = Depends(get_current_admin)):
     return await asyncio.to_thread(host_stats.full_snapshot)
 
 
+@system_router.get("/timezone")
+async def system_timezone(_: str = Depends(get_current_admin)):
+    """The timezone schedule-rule hours are interpreted in.
+
+    The dashboard shows this next to every rule time so there is never any
+    doubt which "12:00" a rule means.
+    """
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(settings.SCHEDULE_TZ)
+    offset = dt.datetime.now(tz).strftime("%z")  # e.g. +0330
+    return {
+        "tz": settings.SCHEDULE_TZ,
+        "label": settings.SCHEDULE_TZ.split("/")[-1].replace("_", " "),
+        "utc_offset": f"UTC{offset[:3]}:{offset[3:]}",
+    }
+
+
 @analytics_router.get("/overview")
 async def overview(days: int = Query(default=30, ge=1, le=365), _: str = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)

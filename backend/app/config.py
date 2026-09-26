@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # enumerate every route. Enable only on trusted networks / local dev.
     DOCS_ENABLED: bool = False
 
+    # IANA timezone whose wall-clock the schedule-rule hours follow.
+    # A rule set for "12:00" fires at 12:00 in THIS zone — set it to your own
+    # (e.g. Asia/Tehran) so the dashboard times match reality. Beat crontabs
+    # (daily reset, cleanup, …) follow it too.
+    SCHEDULE_TZ: str = "UTC"
+
     MEDIA_ROOT: str = "./media"
     MAX_UPLOAD_MB: int = 500
     AUTO_PROCESS_ON_UPLOAD: bool = True
@@ -47,6 +53,23 @@ class Settings(BaseSettings):
                 self.SYNC_DATABASE_URL = self.DATABASE_URL.replace("+aiosqlite", "")
             elif "+asyncpg" in self.DATABASE_URL:
                 self.SYNC_DATABASE_URL = self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_schedule_tz(self):
+        """SCHEDULE_TZ must be a real IANA zone — a typo must not silently
+        shift every post by hours. Fall back to UTC with a loud warning."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(self.SCHEDULE_TZ)
+        except (ZoneInfoNotFoundError, ValueError):
+            import logging
+
+            logging.getLogger("igfunnel").warning(
+                "Invalid SCHEDULE_TZ=%r — falling back to UTC", self.SCHEDULE_TZ
+            )
+            self.SCHEDULE_TZ = "UTC"
         return self
 
 

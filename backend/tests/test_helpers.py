@@ -2403,13 +2403,16 @@ class TestBestSlots:
 
         slots = aggregate_slots([(18, 100), (18, 200), (9, 50), (21, 1000)])
         assert [s["hour_utc"] for s in slots] == [21, 18, 9]
-        assert slots[0]["avg_views"] == 1000 and slots[0]["tehran"] == "00:30"
+        assert slots[0]["avg_views"] == 1000 and slots[0]["local"] == "21:00"
 
-    def test_tehran_conversion(self):
-        from app.services.best_slots import tehran_label
+    def test_local_conversion_uses_schedule_tz(self, monkeypatch):
+        from app.config import settings
+        from app.services.best_slots import local_hour, local_label
 
-        assert tehran_label(18) == "21:30" and tehran_label(0) == "03:30"
-        assert tehran_label(20, 30) == "00:00"
+        monkeypatch.setattr(settings, "SCHEDULE_TZ", "Asia/Tehran")
+        assert local_label(18) == "21:30" and local_label(0) == "03:30"
+        assert local_label(20, 30) == "00:00"
+        assert local_hour(18) == 21 and local_hour(21) == 0
 
     def test_limit_respected(self):
         from app.services.best_slots import aggregate_slots
