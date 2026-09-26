@@ -17,38 +17,50 @@ from app.database import Base, engine
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("igfunnel")
 
-app = FastAPI(title="IG Funnel API", version="1.0.0")
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-setup_middleware(app, limiter)
 
-
-@app.exception_handler(AppError)
-async def app_error_handler(request: Request, exc: AppError):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.code, "message": exc.message, "details": exc.details},
+def create_app() -> FastAPI:
+    """App factory — lets tests build variants (e.g. docs on/off) without
+    re-importing the module."""
+    docs = settings.DOCS_ENABLED
+    application = FastAPI(
+        title="IG Funnel API",
+        version="1.0.0",
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
     )
+    application.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    setup_middleware(application, limiter)
 
-
-@app.get("/health")
-async def health():
-    return {"ok": True, "env": settings.ENV}
-
-
-app.include_router(router)
-app.include_router(ws_mount)
-
-
-@app.on_event("startup")
-async def startup():
-    if settings.SECRET_KEY in ("change-me", "change-this-to-a-long-random-string", ""):
-        log.warning(
-            "SECRET_KEY is still the default — set a unique value in .env, "
-            "otherwise forged admin JWTs are trivial."
+    @application.exception_handler(AppError)
+    async def app_error_handler(request: Request, exc: AppError):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.code, "message": exc.message, "details": exc.details},
         )
-    os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
-    for sub in ("raw", "processed", "thumbnails", "sessions", "audio", "profile_pics"):
-        os.makedirs(os.path.join(settings.MEDIA_ROOT, sub), exist_ok=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    log.info("IG Funnel API ready (env=%s)", settings.ENV)
+
+    @application.get("/health")
+    async def health():
+        return {"ok": True, "env": settings.ENV}
+
+    application.include_router(router)
+    application.include_router(ws_mount)
+
+    @application.on_event("startup")
+    async def startup():
+        if settings.SECRET_KEY in ("change-me", "change-this-to-a-long-random-string", ""):
+            log.warning(
+                "SECRET_KEY is still the default — set a unique value in .env, "
+                "otherwise forged admin JWTs are trivial."
+            )
+        os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
+        for sub in ("raw", "processed", "thumbnails", "sessions", "audio", "profile_pics"):
+            os.makedirs(os.path.join(settings.MEDIA_ROOT, sub), exist_ok=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        log.info("IG Funnel API ready (env=%s)", settings.ENV)
+
+    return application
+
+
+app = create_app()

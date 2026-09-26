@@ -17,8 +17,8 @@ docker compose up --build
   `NEXT_PUBLIC_API_URL`, internal rewrite to `http://backend:8000`).
 - Only set `FRONTEND_API_URL` when exposing the frontend container directly
   (no nginx) — it is baked into the client bundle at build time.
-- API docs (`/docs`, `/openapi.json`) are reachable directly on the backend
-  (`http://localhost:8000/docs` in local dev) or via the nginx profile.
+- API docs (`/docs`, `/openapi.json`) are disabled by default for security —
+  set `DOCS_ENABLED=true` to expose them (local dev only).
 - Login with `ADMIN_USERNAME` / `ADMIN_PASSWORD` from `.env`.
 
 ## Services

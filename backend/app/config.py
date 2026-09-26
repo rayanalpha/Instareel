@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "changeme-please"
     JWT_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_DAYS: int = 7
+    # Self-docs (/docs, /redoc, /openapi.json) are OFF by default — they
+    # enumerate every route. Enable only on trusted networks / local dev.
+    DOCS_ENABLED: bool = False
 
     MEDIA_ROOT: str = "./media"
     MAX_UPLOAD_MB: int = 500
