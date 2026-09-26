@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import limiter
 from app.config import settings
-from app.core.security import create_access_token, create_refresh_token, decode_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    get_token_claims,
+    refresh_token_ttl,
+)
+from app.core.token_blacklist import blacklist_jti, is_blacklisted
 from app.schemas.auth import LoginIn, MeOut, RefreshIn, TokenOut
 from app.services.log_service import log_event
 
@@ -33,10 +39,41 @@ async def login(request: Request, body: LoginIn):
 @router.post("/refresh", response_model=TokenOut)
 @limiter.limit("10/minute")
 async def refresh(request: Request, body: RefreshIn):
+    # Single-use refresh tokens: the presented token is blacklisted by jti
+    # before the new pair is issued, so a replayed (stolen) token 401s.
     try:
-        subject = decode_token(body.refresh_token, expected_type="refresh")
+        claims = get_token_claims(body.refresh_token, expected_type="refresh")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    jti = claims.get("jti")
+    if not jti:
+        # Token minted before jti existed — force a fresh login once.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please log in again")
+    try:
+        if await is_blacklisted(jti):
+            await log_event(
+                "WARNING", "auth", "Replayed refresh token rejected — possible token theft"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token already used"
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Fail closed: without the blacklist we cannot guarantee single-use.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth store unavailable, try again shortly",
+        ) from exc
+    try:
+        await blacklist_jti(jti, refresh_token_ttl(claims))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth store unavailable, try again shortly",
+        ) from exc
+    subject = str(claims["sub"])
+    await log_event("INFO", "auth", f"Token refreshed for '{subject}'")
     return TokenOut(
         access_token=create_access_token(subject),
         refresh_token=create_refresh_token(subject),

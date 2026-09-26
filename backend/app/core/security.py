@@ -1,5 +1,7 @@
 """JWT auth, bcrypt passwords, Fernet encryption for stored secrets."""
 import datetime as dt
+import time
+import uuid
 
 import bcrypt
 import jwt
@@ -41,7 +43,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def _encode(payload: dict, expires: dt.timedelta) -> str:
     now = dt.datetime.now(dt.timezone.utc)
-    payload = {**payload, "iat": now, "exp": now + expires}
+    # jti: unique token id — used for single-use refresh tokens
+    # (see app.core.token_blacklist).
+    payload = {**payload, "jti": uuid.uuid4().hex, "iat": now, "exp": now + expires}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 
@@ -54,6 +58,14 @@ def create_refresh_token(subject: str) -> str:
 
 
 def decode_token(token: str, expected_type: str = "access") -> str:
+    return str(get_token_claims(token, expected_type)["sub"])
+
+
+def get_token_claims(token: str, expected_type: str = "access") -> dict:
+    """Decode and validate a JWT, returning its claims (incl. jti/exp).
+
+    Raises ValueError on any problem — callers turn it into 401.
+    """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError as exc:
@@ -66,7 +78,15 @@ def decode_token(token: str, expected_type: str = "access") -> str:
     if not sub:
         # A structurally valid JWT without subject must 401, never 500.
         raise ValueError("Invalid token")
-    return str(sub)
+    return payload
+
+
+def refresh_token_ttl(claims: dict) -> int:
+    """Seconds until this token expires (for blacklist TTL)."""
+    try:
+        return max(int(claims["exp"] - time.time()), 1)
+    except (KeyError, TypeError):
+        return 1
 
 
 def create_preview_token(video_id: int) -> str:
